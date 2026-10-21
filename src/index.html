@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'">
+  <title>Pocket-Mapp-Creator</title>
+  <link rel="icon" href="icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- ============ TOP BAR ============ -->
+  <header id="topbar">
+    <div class="brand"><img class="logo" src="icon.png" alt=""> Pocket-Mapp-Creator</div>
+    <div class="group">
+      <button data-cmd="new" title="New map (Ctrl+N)">New</button>
+      <button data-cmd="open" title="Open map (Ctrl+O)">Open</button>
+      <button data-cmd="save" title="Save map (Ctrl+S)">Save</button>
+    </div>
+    <div class="group">
+      <button data-cmd="undo" title="Undo (Ctrl+Z)">↶</button>
+      <button data-cmd="redo" title="Redo (Ctrl+Y)">↷</button>
+    </div>
+    <div class="group">
+      <label>Style
+        <select id="styleSelect">
+          <option value="parchment">Parchment</option>
+          <option value="colour">Full colour</option>
+          <option value="watercolour">Watercolour</option>
+        </select>
+      </label>
+      <button data-cmd="resize" title="Change map size">Map size…</button>
+      <label class="chk"><input type="checkbox" id="gridToggle"> Grid</label>
+      <label class="chk"><input type="checkbox" id="borderToggle" checked> Border</label>
+    </div>
+    <div class="spacer"></div>
+    <div class="group">
+      <span id="zoomLabel">100%</span>
+      <button data-cmd="zoomFit" title="Fit (Ctrl+0)">Fit</button>
+    </div>
+    <div class="group">
+      <button class="primary" data-cmd="exportPng">Export PNG</button>
+      <button class="primary" data-cmd="exportJpg">Export JPG</button>
+    </div>
+  </header>
+
+  <main id="layout">
+    <!-- ============ TOOLS ============ -->
+    <nav id="tools">
+      <button class="tool active" data-tool="select" title="Select / move / rotate / scale (V)"><span>⌖</span>Select</button>
+      <button class="tool" data-tool="stamp" title="Place assets (S)"><span>❋</span>Stamp</button>
+      <button class="tool" data-tool="land" title="Paint land / water (B)"><span>⬟</span>Land</button>
+      <button class="tool" data-tool="path" title="Paint ground paths, roads, dirt (P)"><span>▒</span>Ground</button>
+      <button class="tool" data-tool="line" title="Draw rivers, roads, borders (L)"><span>〰</span>Lines</button>
+      <button class="tool" data-tool="text" title="Add text labels (T)"><span>A</span>Text</button>
+      <button class="tool" data-tool="pan" title="Pan (H, or hold Space)"><span>✋</span>Pan</button>
+    </nav>
+
+    <!-- ============ LIBRARY ============ -->
+    <aside id="library">
+      <div class="panel-title">Asset library</div>
+      <div class="filters">
+        <div class="seg" id="genreSeg">
+          <button data-genre="fantasy" class="on">Fantasy</button>
+          <button data-genre="scifi">Sci-Fi</button>
+          <button data-genre="modern">Modern</button>
+          <button data-genre="realistic">Realistic</button>
+          <button data-genre="all">All</button>
+        </div>
+        <div class="seg small" id="kindSeg">
+          <button data-kind="all" class="on">All</button>
+          <button data-kind="world" title="Side-view icons for world & region maps">World</button>
+          <button data-kind="town" title="3/4 view buildings for towns, cities, villages">Town 3/4</button>
+          <button data-kind="battle" title="Top-down assets for RPG battle maps">Battle</button>
+          <button data-kind="decor">Decor</button>
+        </div>
+        <input id="assetSearch" type="search" placeholder="Search assets…">
+      </div>
+      <div id="assetGrid"></div>
+      <div class="custom-head">
+        <span>My imported assets</span>
+        <button data-cmd="importAsset" class="mini">+ Import</button>
+      </div>
+      <div id="customGrid"></div>
+    </aside>
+
+    <!-- ============ CANVAS ============ -->
+    <section id="stageWrap">
+      <canvas id="stage"></canvas>
+      <div id="toolOptions"></div>
+      <div id="status"></div>
+    </section>
+
+    <!-- ============ RIGHT PANEL ============ -->
+    <aside id="right">
+      <div class="panel-title">Properties</div>
+      <div id="props"><p class="muted">Select something on the map to edit it.</p></div>
+      <div class="panel-title">Assets used <span id="usedCount" class="badge">0</span></div>
+      <div id="usedList"></div>
+    </aside>
+  </main>
+
+  <!-- ============ DIALOG ============ -->
+  <div id="modal" class="hidden"><div class="dialog" id="dialog"></div></div>
+
+  <script src="asset-manifest.js"></script>
+  <script src="js/terrain.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

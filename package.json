@@ -1,0 +1,66 @@
+{
+  "name": "pocket-mapp-creator",
+  "productName": "Pocket-Mapp-Creator",
+  "version": "0.1.0",
+  "description": "Desktop fantasy, sci-fi, modern and realistic map maker - parchment, full colour and watercolour styles.",
+  "main": "main.js",
+  "author": "project-tech-me <project-tech-me@protonmail.com>",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "assets": "node tools/generate-assets.js",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.projecttechme.pocketmappcreator",
+    "productName": "Pocket-Mapp-Creator",
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "assets/**/*",
+      "LICENSE",
+      "ASSET-LICENSES.md",
+      "build/icon.png",
+      "build/icon.ico"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Graphics",
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.png"
+    },
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "icon": "build/icon.png",
+    "nsis": {
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.7.2",
+    "electron-builder": "^26.0.0"
+  }
+}
