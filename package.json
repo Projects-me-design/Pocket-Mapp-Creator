@@ -9,9 +9,10 @@
   "scripts": {
     "start": "electron .",
     "assets": "node tools/generate-assets.js",
-    "dist": "electron-builder",
-    "dist:win": "electron-builder --win",
-    "dist:linux": "electron-builder --linux"
+    "dist": "electron-builder --publish never",
+    "dist:win": "electron-builder --win --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:linux": "electron-builder --linux --publish never"
   },
   "build": {
     "appId": "com.projecttechme.pocketmappcreator",
@@ -28,24 +29,54 @@
     ],
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "build/icon.ico"
     },
     "linux": {
       "target": [
-        "AppImage",
-        "deb"
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "category": "Graphics",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "maintainer": "project-tech-me <project-tech-me@protonmail.com>",
+      "syncDesktopName": true
     },
     "mac": {
       "target": [
-        "dmg"
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "category": "public.app-category.graphics-design",
+      "identity": null
     },
     "directories": {
       "buildResources": "build",
@@ -57,10 +88,24 @@
       "uninstallerIcon": "build/icon.ico",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "portable": {
+      "artifactName": "${productName}-${version}-win-portable.${ext}"
+    },
+    "publish": null
   },
   "devDependencies": {
     "electron": "^44.7.2",
-    "electron-builder": "^26.0.0"
-  }
+    "electron-builder": "^26.15.3"
+  },
+  "homepage": "https://github.com/Projects-me-design/Pocket-Mapp-Creator",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Projects-me-design/Pocket-Mapp-Creator.git"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "desktopName": "pocket-mapp-creator.desktop"
 }

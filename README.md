@@ -32,19 +32,42 @@ Make Tolkien-style parchment world maps, towns and villages, and top-down RPG ba
 
 ## Running it
 
-Requires Node.js 18+.
+Requires **Node.js 24** or newer (an `.nvmrc` is included, so `nvm use` picks the right version).
 
 ```bash
 npm install
 npm start
 ```
 
-## Building an installer
+## Building installers with GitHub (Windows, macOS, Linux)
+
+The workflow in `.github/workflows/build.yml` builds all three platforms on GitHub's own machines using Node.js 24.
+
+1. Create a GitHub repository called `Pocket-Mapp-Creator` and push this folder to it, including `package-lock.json`.
+2. **To test a build:** on GitHub open **Actions → Build installers → Run workflow**. When it finishes (about 10 minutes), download the installers from the **Artifacts** section at the bottom of the run page.
+3. **To publish a release:** bump `version` in `package.json`, then tag and push:
+   ```bash
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+   The installers are attached to a new GitHub Release automatically.
+
+| Platform | Files produced |
+|---|---|
+| Windows | `…-win-x64.exe` (installer) and `…-win-portable.exe` (no install needed) |
+| macOS | `…-mac-x64.dmg` (Intel) and `…-mac-arm64.dmg` (Apple Silicon) |
+| Linux | `…-linux-x86_64.AppImage` and `…-linux-amd64.deb` |
+
+**Unsigned builds:** the installers are not code-signed, which would need paid Apple and Windows certificates.
+- On Windows, SmartScreen may say "Windows protected your PC". Click **More info → Run anyway**.
+- On macOS, right-click the app and choose **Open** the first time. If macOS says the app "is damaged", run `xattr -cr "/Applications/Pocket-Mapp-Creator.app"` in Terminal.
+
+### Building on your own computer
 
 ```bash
-npm run dist:win     # Windows installer + portable .exe (run on Windows)
-npm run dist:linux   # AppImage + .deb
-npm run dist         # current platform
+npm run dist:win     # on Windows
+npm run dist:mac     # on a Mac
+npm run dist:linux   # on Linux
 ```
 
 Output goes to `dist/`.

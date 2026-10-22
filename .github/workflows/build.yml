@@ -1,0 +1,94 @@
+# Pocket-Mapp-Creator — build Windows, macOS and Linux installers
+# Copyright (c) 2026 project-tech-me
+#
+# How to run:
+#   • Manually:  GitHub → Actions → "Build installers" → Run workflow
+#   • Release:   push a version tag, e.g.  git tag v0.1.0 && git push origin v0.1.0
+#                (installers are attached to a GitHub Release automatically)
+#
+# Every action used here runs on Node.js 24, and the app is built with Node.js 24.
+
+name: Build installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            script: dist:win
+          - name: macOS
+            os: macos-latest
+            script: dist:mac
+          - name: Linux
+            os: ubuntu-latest
+            script: dist:linux
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build installers
+        run: npm run ${{ matrix.script }}
+        env:
+          # The macOS build is unsigned; stop electron-builder looking for a certificate
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v5
+        with:
+          name: Pocket-Mapp-Creator-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.AppImage
+            dist/*.deb
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@v5
+        with:
+          path: installers
+          merge-multiple: true
+
+      - name: Create release and attach installers
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ls -la installers
+          gh release create "${GITHUB_REF_NAME}" installers/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Pocket-Mapp-Creator ${GITHUB_REF_NAME}" \
+            --generate-notes
