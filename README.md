@@ -17,13 +17,15 @@ Make Tolkien-style parchment world maps, towns and villages, and top-down RPG ba
 - **Town / City / Village** — 3/4-view houses, taverns, chapels, windmills, walls, gatehouses
 - **Battle maps** — top-down trees, rocks, furniture, campfires, with a square or hex grid (default 70 px cells)
 
-**Asset genres:** Fantasy, Sci-Fi, Modern, Realistic — 107 original assets × 3 styles.
+**Asset genres:** Fantasy, Sci-Fi, Modern, Realistic — 127 original assets × 3 styles.
+Includes ships (galleon, longship, merchant ship, rowing boat, cargo ship), docks, jetties and harbours, sea stacks and rocks for the ocean, and stone, wooden and suspension bridges, with top-down versions for battle maps.
 
 **Editing**
 - Adjustable map size (presets or custom up to 8000 × 8000) — resize later by extending/cropping or by scaling everything
 - Every asset can be moved, **rotated** (handle, R key, or slider) and **scaled** (corner handles, [ ] keys, or slider), flipped, layered, faded
 - **Scatter brush** to paint whole forests or mountain ranges with random size, rotation and flip
 - Every new map starts as **open ocean**. Paint land in any shape with the **Land brush** (B), and turn land back into sea with the **Ocean brush** (E). Coastlines are inked automatically. The **Ground brush** paints roads, dirt and clearings
+- **Select a landmass** by clicking it with the Select tool. Drag it to move it, drag a corner to make it **bigger or smaller**, or use the round handle to rotate it. Size and rotation can also be typed in. Mountains, towns, roads and labels on that land move with it (this can be turned off). Delete removes the land, and Esc or clicking the sea finishes
 - **Line tool** for tapering rivers, dashed roads, dotted trails, dash-dot borders and walls
 - **Text labels**: pick a font, size and colour in the Text tool bar, then click where the label should go. Drag a label to move it and resize it from the same bar. 8 bundled map fonts, halo, letter-spacing, CAPS and **curved text**. Labels always sit on top of land, assets and lines
 - **Assets used** panel — every asset type on the map with its count; select all copies, hide them, or delete all copies in one click; expand to jump to individual copies
@@ -94,6 +96,7 @@ npm run assets
 | Delete | Delete selection |
 | R / Shift+R | Rotate ±15° (Shift while dragging the handle snaps to 15°) |
 | F | Flip |
+| Click land (Select tool) | Select a landmass; [ ] resize it, R rotate, Delete remove |
 | [ / ] | Brush size, or scale the selection |
 | Alt while painting | Swap Land ↔ Ocean brush |
 

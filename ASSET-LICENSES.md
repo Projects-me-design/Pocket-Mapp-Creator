@@ -18,7 +18,7 @@ These icon files are **not** covered by the MIT Licence or the CC0 dedication in
 
 ## 1. Built-in map assets — CC0 1.0 (public domain)
 
-All 107 built-in assets (each supplied in three styles: Parchment, Full colour and Watercolour — 321 SVG files in `assets/`) are **original artwork** created for Pocket-Mapp-Creator by project-tech-me. They are drawn procedurally by `tools/generate-assets.js`; no third-party artwork was copied, traced or adapted.
+All 127 built-in assets (each supplied in three styles: Parchment, Full colour and Watercolour — 381 SVG files in `assets/`) are **original artwork** created for Pocket-Mapp-Creator by project-tech-me. They are drawn procedurally by `tools/generate-assets.js`; no third-party artwork was copied, traced or adapted.
 
 They are dedicated to the public domain under the **Creative Commons CC0 1.0 Universal** dedication:
 https://creativecommons.org/publicdomain/zero/1.0/
@@ -136,6 +136,26 @@ You may copy, modify and use them — including in commercial maps, books and ga
 | real-tree | Oak (top-down) | Realistic | Battle (top-down) | CC0 1.0 | project-tech-me (original) |
 | real-rocks | Scree Rocks | Realistic | Battle (top-down) | CC0 1.0 | project-tech-me (original) |
 | real-pond | Pond | Realistic | Battle (top-down) | CC0 1.0 | project-tech-me (original) |
+| galleon | Galleon | Fantasy | Decor | CC0 1.0 | project-tech-me (original) |
+| longship | Longship | Fantasy | Decor | CC0 1.0 | project-tech-me (original) |
+| cog | Merchant Ship | Fantasy | Decor | CC0 1.0 | project-tech-me (original) |
+| rowboat | Rowing Boat | Fantasy | Decor | CC0 1.0 | project-tech-me (original) |
+| sea-stack | Sea Stack | Fantasy | World (side view) | CC0 1.0 | project-tech-me (original) |
+| sea-rocks | Sea Rocks | Fantasy | World (side view) | CC0 1.0 | project-tech-me (original) |
+| stone-bridge | Stone Bridge | Fantasy | World (side view) | CC0 1.0 | project-tech-me (original) |
+| wooden-bridge | Wooden Bridge | Fantasy | World (side view) | CC0 1.0 | project-tech-me (original) |
+| dock | Wooden Dock (3/4) | Fantasy | Town (3/4 view) | CC0 1.0 | project-tech-me (original) |
+| harbour | Harbour Town | Fantasy | World (side view) | CC0 1.0 | project-tech-me (original) |
+| dock-top | Dock (top-down) | Fantasy | Battle (top-down) | CC0 1.0 | project-tech-me (original) |
+| jetty-top | Jetty (top-down) | Fantasy | Battle (top-down) | CC0 1.0 | project-tech-me (original) |
+| ship-top | Ship (top-down) | Fantasy | Battle (top-down) | CC0 1.0 | project-tech-me (original) |
+| rowboat-top | Rowing Boat (top-down) | Fantasy | Battle (top-down) | CC0 1.0 | project-tech-me (original) |
+| sea-rocks-top | Rocks in Water | Fantasy | Battle (top-down) | CC0 1.0 | project-tech-me (original) |
+| wooden-bridge-top | Wooden Bridge (top-down) | Fantasy | Battle (top-down) | CC0 1.0 | project-tech-me (original) |
+| stone-bridge-top | Stone Bridge (top-down) | Fantasy | Battle (top-down) | CC0 1.0 | project-tech-me (original) |
+| suspension-bridge | Suspension Bridge | Modern | World (side view) | CC0 1.0 | project-tech-me (original) |
+| cargo-ship | Cargo Ship | Modern | World (side view) | CC0 1.0 | project-tech-me (original) |
+| speedboat-top | Speedboat (top-down) | Modern | Battle (top-down) | CC0 1.0 | project-tech-me (original) |
 
 ## 2. Fonts — SIL Open Font License 1.1
 

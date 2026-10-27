@@ -79,6 +79,7 @@
   }
 
   function newMap(o) {
+    landSel = null;
     doc = makeDoc(o);
     allocMasks(doc.width, doc.height);
     const start = o.start || 'sea'; // every new map starts as open ocean; the user paints the land
@@ -304,6 +305,7 @@
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
     if (baseCanvas) ctx.drawImage(baseCanvas, 0, 0, doc.width, doc.height);
     else { ctx.fillStyle = PAPER[doc.style]; ctx.fillRect(0, 0, doc.width, doc.height); }
+    if (opts.floatLand) drawFloatingLand(ctx);
     if (opts.grid !== false) drawGrid(ctx);
     for (const o of doc.objects) if (o.t !== 'text') drawObject(ctx, o);
     drawBorder(ctx);
@@ -329,11 +331,11 @@
     ctx.setTransform(dpr * view.zoom, 0, 0, dpr * view.zoom, dpr * view.ox, dpr * view.oy);
     ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.55)'; ctx.shadowBlur = 30; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, doc.width, doc.height); ctx.restore();
     ctx.save(); ctx.beginPath(); ctx.rect(0, 0, doc.width, doc.height); ctx.clip();
-    renderMapContent(ctx, base);
+    renderMapContent(ctx, base, { floatLand: true });
     if (paintPreview) { ctx.globalAlpha = 0.85; ctx.drawImage(paintPreview, 0, 0, doc.width, doc.height); ctx.globalAlpha = 1; }
     if (lineDraft && lineDraft.pts.length > 1) drawLine(ctx, lineDraft);
     ctx.restore();
-    drawSelection(ctx);
+    drawSelection(ctx); drawLandSelection(ctx);
     if (marquee) {
       ctx.save(); ctx.strokeStyle = '#4fa3e0'; ctx.fillStyle = 'rgba(79,163,224,.12)'; ctx.lineWidth = 1 / view.zoom; ctx.setLineDash([5 / view.zoom, 4 / view.zoom]);
       const x = Math.min(marquee.x0, marquee.x1), y = Math.min(marquee.y0, marquee.y1);
@@ -461,6 +463,162 @@
     commit();
   }
 
+  // ------------------------------------------------------------------ landmass selection (move / resize / rotate land)
+  // Land is a painted mask, so a "landmass" is one connected region of it. Selecting one lifts it
+  // out of the mask into a floating piece; it is stamped back (transformed) when the selection ends.
+  let landSel = null; let settling = false;
+  function landAt(x, y) {
+    const mx = Math.floor(x * maskScale), my = Math.floor(y * maskScale);
+    if (mx < 0 || my < 0 || mx >= landMask.width || my >= landMask.height) return false;
+    return landMask.getContext('2d', { willReadFrequently: true }).getImageData(mx, my, 1, 1).data[3] > 127;
+  }
+  function pickLand(x, y) {
+    const mw = landMask.width, mh = landMask.height;
+    const lctx = landMask.getContext('2d', { willReadFrequently: true });
+    const pctx = pathMask.getContext('2d', { willReadFrequently: true });
+    const limg = lctx.getImageData(0, 0, mw, mh), L = limg.data;
+    const sx = Math.floor(x * maskScale), sy = Math.floor(y * maskScale);
+    if (sx < 0 || sy < 0 || sx >= mw || sy >= mh || L[(sy * mw + sx) * 4 + 3] <= 127) return null;
+    // flood fill the connected land
+    const seen = new Uint8Array(mw * mh); const stack = new Int32Array(mw * mh); let sp = 0;
+    let x0 = sx, x1 = sx, y0 = sy, y1 = sy;
+    stack[sp++] = sy * mw + sx; seen[sy * mw + sx] = 1;
+    while (sp) {
+      const i = stack[--sp], px = i % mw, py = (i / mw) | 0;
+      if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py;
+      const nb = [px > 0 ? i - 1 : -1, px < mw - 1 ? i + 1 : -1, py > 0 ? i - mw : -1, py < mh - 1 ? i + mw : -1];
+      for (const n of nb) if (n >= 0 && !seen[n] && L[n * 4 + 3] > 127) { seen[n] = 1; stack[sp++] = n; }
+    }
+    // include the soft anti-aliased edge pixels around it
+    x0 = Math.max(0, x0 - 1); y0 = Math.max(0, y0 - 1); x1 = Math.min(mw - 1, x1 + 1); y1 = Math.min(mh - 1, y1 + 1);
+    const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+    const inc = new Uint8Array(bw * bh);
+    for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) {
+      const i = yy * mw + xx; let on = seen[i];
+      if (!on && L[i * 4 + 3] > 0) on = (xx > 0 && seen[i - 1]) || (xx < mw - 1 && seen[i + 1]) || (yy > 0 && seen[i - mw]) || (yy < mh - 1 && seen[i + mw]);
+      inc[(yy - y0) * bw + (xx - x0)] = on ? 1 : 0;
+    }
+    // lift the land (and any ground paint on it) out into floating canvases
+    const pimg = pctx.getImageData(0, 0, mw, mh), Pd = pimg.data;
+    const comp = document.createElement('canvas'); comp.width = bw; comp.height = bh;
+    const pcomp = document.createElement('canvas'); pcomp.width = bw; pcomp.height = bh;
+    const ci = comp.getContext('2d').createImageData(bw, bh), pi = pcomp.getContext('2d').createImageData(bw, bh);
+    for (let yy = 0; yy < bh; yy++) for (let xx = 0; xx < bw; xx++) {
+      const k = yy * bw + xx; if (!inc[k]) continue;
+      const i = ((yy + y0) * mw + xx + x0) * 4;
+      ci.data[k * 4] = ci.data[k * 4 + 1] = ci.data[k * 4 + 2] = 255; ci.data[k * 4 + 3] = L[i + 3];
+      pi.data[k * 4] = pi.data[k * 4 + 1] = pi.data[k * 4 + 2] = 255; pi.data[k * 4 + 3] = Pd[i + 3];
+      L[i + 3] = 0; Pd[i + 3] = 0;
+    }
+    comp.getContext('2d').putImageData(ci, 0, 0); pcomp.getContext('2d').putImageData(pi, 0, 0);
+    // preview image: the land as currently rendered (coastline, ripples and all), cut out around it
+    if (baseDirty || !base) rebuildBase(true);
+    const m = Math.ceil(60 * maskScale);
+    const pw = bw + 2 * m, ph = bh + 2 * m;
+    const halo = document.createElement('canvas'); halo.width = pw; halo.height = ph;
+    const hc = halo.getContext('2d');
+    for (let a = 0; a < 16; a++) for (const rr of [m * 0.45, m * 0.9]) hc.drawImage(comp, m + Math.cos(a / 16 * 6.283) * rr, m + Math.sin(a / 16 * 6.283) * rr);
+    const prev = document.createElement('canvas'); prev.width = pw; prev.height = ph;
+    const pc = prev.getContext('2d');
+    pc.drawImage(base, x0 - m, y0 - m, pw, ph, 0, 0, pw, ph);
+    pc.globalCompositeOperation = 'destination-in'; pc.filter = `blur(${Math.max(1, m * 0.15)}px)`; pc.drawImage(halo, 0, 0);
+    lctx.putImageData(limg, 0, 0); pctx.putImageData(pimg, 0, 0);
+    // items standing on this land move with it
+    const onIt = (px, py) => { const mx = Math.floor(px * maskScale) - x0, my = Math.floor(py * maskScale) - y0; return mx >= 0 && my >= 0 && mx < bw && my < bh && inc[my * bw + mx]; };
+    const items = [];
+    for (const o of doc.objects) {
+      if (o.hidden || o.locked) continue;
+      if (o.t === 'line') { const n = o.pts.filter(([px, py]) => onIt(px, py)).length; if (n > o.pts.length / 2) items.push({ o, pts: o.pts.map((q) => q.slice()), w: o.w }); }
+      else if (onIt(o.x, o.y)) items.push({ o, x: o.x, y: o.y, s: o.s, r: o.r });
+    }
+    const ms = maskScale;
+    landSel = { comp, pcomp, prev, m, x0, y0, bw, bh, w0: bw / ms, h0: bh / ms, cx: (x0 + bw / 2) / ms, cy: (y0 + bh / 2) / ms, dx: 0, dy: 0, s: 1, r: 0, items, withItems: true, changed: false };
+    baseDirty = true; needsDraw = true;
+    return landSel;
+  }
+  function landPoint(px, py) { // apply the current land transform to a map point
+    const L = landSel, c = Math.cos(rad(L.r)), s = Math.sin(rad(L.r));
+    const x = (px - L.cx) * L.s, y = (py - L.cy) * L.s;
+    return [L.cx + L.dx + x * c - y * s, L.cy + L.dy + x * s + y * c];
+  }
+  function applyLandItems() {
+    const L = landSel; if (!L) return;
+    for (const it of L.items) {
+      const o = it.o;
+      if (o.t === 'line') { o.pts = (L.withItems ? it.pts.map(([x, y]) => landPoint(x, y)) : it.pts.map((q) => q.slice())); o.w = L.withItems ? it.w * L.s : it.w; }
+      else if (L.withItems) { [o.x, o.y] = landPoint(it.x, it.y); o.s = it.s * L.s; o.r = ((it.r + L.r + 540) % 360) - 180; }
+      else { o.x = it.x; o.y = it.y; o.s = it.s; o.r = it.r; }
+    }
+    L.changed = L.dx !== 0 || L.dy !== 0 || L.s !== 1 || L.r !== 0;
+    needsDraw = true;
+  }
+  function stampLand(mask, src) {
+    const L = landSel, c = mask.getContext('2d'), ms = maskScale;
+    c.save(); c.setTransform(ms, 0, 0, ms, 0, 0);
+    c.translate(L.cx + L.dx, L.cy + L.dy); c.rotate(rad(L.r)); c.scale(L.s, L.s);
+    c.imageSmoothingEnabled = !(L.s === 1 && L.r === 0);
+    c.drawImage(src, -L.w0 / 2, -L.h0 / 2, L.w0, L.h0);
+    c.restore();
+  }
+  // Put the floating land back into the map. remove=true deletes it instead.
+  function settleLand(remove = false) {
+    if (!landSel || settling) return;
+    settling = true;
+    const L = landSel; const changed = L.changed || remove;
+    if (!remove) {
+      if (L.s === 1 && L.r === 0) { // exact pixel restore (no resampling) when only moved or untouched
+        const ox = Math.round(L.dx * maskScale), oy = Math.round(L.dy * maskScale);
+        landMask.getContext('2d').drawImage(L.comp, L.x0 + ox, L.y0 + oy); pathMask.getContext('2d').drawImage(L.pcomp, L.x0 + ox, L.y0 + oy);
+      } else { stampLand(landMask, L.comp); stampLand(pathMask, L.pcomp); }
+    }
+    landSel = null;
+    base = MT.renderBase({ landMask, pathMask, mapW: doc.width, mapH: doc.height, scale: maskScale, style: doc.style, mapType: doc.type, seed: doc.seed });
+    baseDirty = false; needsDraw = true;
+    if (changed) commit();
+    settling = false;
+    renderProps();
+  }
+  function landCorners() {
+    const L = landSel; const w = L.w0 / 2, h = L.h0 / 2;
+    return [[-w, -h], [w, -h], [w, h], [-w, h]].map(([x, y]) => landPoint(L.cx + x, L.cy + y));
+  }
+  function landRotHandle() {
+    const L = landSel; const c = Math.cos(rad(L.r)), s = Math.sin(rad(L.r)), off = (L.h0 * L.s) / 2 + 28 / view.zoom;
+    return [L.cx + L.dx + off * s, L.cy + L.dy - off * c];
+  }
+  function hitLandHandle(x, y) {
+    if (!landSel) return null; const tol = 10 / view.zoom;
+    const rh = landRotHandle(); if (Math.hypot(x - rh[0], y - rh[1]) < tol) return 'rotate';
+    for (const [cx, cy] of landCorners()) if (Math.hypot(x - cx, y - cy) < tol) return 'scale';
+    return null;
+  }
+  function insideLandBox(x, y) {
+    if (!landSel) return false; const L = landSel;
+    const c = Math.cos(-rad(L.r)), s = Math.sin(-rad(L.r));
+    const lx = (x - L.cx - L.dx) * c - (y - L.cy - L.dy) * s, ly = (x - L.cx - L.dx) * s + (y - L.cy - L.dy) * c;
+    return Math.abs(lx) <= (L.w0 * L.s) / 2 && Math.abs(ly) <= (L.h0 * L.s) / 2;
+  }
+  function drawFloatingLand(ctx) {
+    const L = landSel; if (!L) return; const ms = maskScale;
+    ctx.save(); ctx.translate(L.cx + L.dx, L.cy + L.dy); ctx.rotate(rad(L.r)); ctx.scale(L.s, L.s);
+    ctx.drawImage(L.prev, -L.w0 / 2 - L.m / ms, -L.h0 / 2 - L.m / ms, L.prev.width / ms, L.prev.height / ms);
+    ctx.restore();
+  }
+  function drawLandSelection(ctx) {
+    if (!landSel) return; const z = view.zoom, cs = landCorners(), hs = 10 / z, rh = landRotHandle();
+    ctx.save(); ctx.strokeStyle = '#e0a640'; ctx.lineWidth = 2 / z; ctx.setLineDash([8 / z, 5 / z]);
+    ctx.beginPath(); cs.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.stroke();
+    ctx.setLineDash([]);
+    const top = [(cs[0][0] + cs[1][0]) / 2, (cs[0][1] + cs[1][1]) / 2];
+    ctx.beginPath(); ctx.moveTo(top[0], top[1]); ctx.lineTo(rh[0], rh[1]); ctx.stroke();
+    ctx.fillStyle = '#fff';
+    for (const [x, y] of cs) { ctx.fillRect(x - hs / 2, y - hs / 2, hs, hs); ctx.strokeRect(x - hs / 2, y - hs / 2, hs, hs); }
+    ctx.beginPath(); ctx.arc(rh[0], rh[1], hs * 0.65, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+  function setLandScale(v) { if (!landSel) return; landSel.s = clamp(v, 0.05, 10); applyLandItems(); }
+  function setLandRot(v) { if (!landSel) return; landSel.r = ((v + 540) % 360) - 180; applyLandItems(); }
+
   // ------------------------------------------------------------------ objects: create / edit
   function addAsset(key, x, y, opts = {}) {
     const o = { id: uid(), t: 'asset', a: key, x, y, s: opts.s ?? ui.stampScale, r: opts.r ?? 0, fx: !!opts.fx, o: 1 };
@@ -527,6 +685,7 @@
   }
   function resetHistory() { history.length = 0; hIndex = -1; lastLandSnap = lastPathSnap = null; commit(true); }
   function commit(initial = false) {
+    if (landSel && !settling) { const ch = landSel.changed; settleLand(); if (ch) return; /* settling already saved this step */ }
     history.length = hIndex + 1;
     history.push(snapshot()); if (history.length > 60) history.shift();
     hIndex = history.length - 1;
@@ -546,8 +705,8 @@
     if (prevSize[0] !== doc.width || prevSize[1] !== doc.height) zoomFit();
     syncTopbar(); refreshPanels(); needsDraw = true;
   }
-  function undo() { if (hIndex > 0) { hIndex--; restore(history[hIndex]); markDirty(); } }
-  function redo() { if (hIndex < history.length - 1) { hIndex++; restore(history[hIndex]); markDirty(); } }
+  function undo() { if (landSel) { const ch = landSel.changed; settleLand(); if (ch) { hIndex--; restore(history[hIndex]); markDirty(); return; } } if (hIndex > 0) { hIndex--; restore(history[hIndex]); markDirty(); } }
+  function redo() { settleLand(); if (hIndex < history.length - 1) { hIndex++; restore(history[hIndex]); markDirty(); } }
   let dirtyFlag = false;
   function markDirty() { dirtyFlag = true; document.title = `Pocket-Mapp-Creator — ${doc.name}*`; }
 
@@ -606,6 +765,14 @@
       return;
     }
     // select tool
+    const lh = hitLandHandle(p.x, p.y);
+    if (lh) {
+      const L = landSel, cx = L.cx + L.dx, cy = L.cy + L.dy;
+      dragState = lh === 'rotate'
+        ? { type: 'landRotate', start: Math.atan2(p.y - cy, p.x - cx), r0: L.r }
+        : { type: 'landScale', d0: Math.hypot(p.x - cx, p.y - cy), s0: L.s };
+      return;
+    }
     const h = hitHandle(p.x, p.y);
     if (h) {
       const o = h.o;
@@ -615,6 +782,15 @@
       return;
     }
     const hit = hitTest(p.x, p.y);
+    if (!hit && landSel && insideLandBox(p.x, p.y)) { dragState = { type: 'landMove', last: p }; return; }
+    if (!hit && !e.shiftKey && !landSel && landAt(p.x, p.y)) {
+      // clicked bare land: select the whole landmass
+      selection.clear(); pickLand(p.x, p.y);
+      dragState = { type: 'landMove', last: p };
+      refreshPanels(); return;
+    }
+    if (landSel) settleLand();
+    if (!hit && !e.shiftKey && landAt(p.x, p.y)) { selection.clear(); pickLand(p.x, p.y); dragState = { type: 'landMove', last: p }; refreshPanels(); return; }
     if (hit) {
       if (e.shiftKey || e.ctrlKey || e.metaKey) { if (selection.has(hit.id)) selection.delete(hit.id); else selection.add(hit.id); }
       else if (!selection.has(hit.id)) { selection.clear(); selection.add(hit.id); }
@@ -667,6 +843,9 @@
     } else if (d.type === 'scale') {
       d.o.s = clamp((d.s0 * Math.hypot(p.x - d.o.x, p.y - d.o.y)) / Math.max(1, d.d0), 0.05, 20); needsDraw = true; refreshPropsValues();
     } else if (d.type === 'marquee') { marquee.x1 = p.x; marquee.y1 = p.y; needsDraw = true; }
+    else if (d.type === 'landMove' && landSel) { landSel.dx += p.x - d.last.x; landSel.dy += p.y - d.last.y; d.last = p; applyLandItems(); refreshLandProps(); }
+    else if (d.type === 'landScale' && landSel) { const cx = landSel.cx + landSel.dx, cy = landSel.cy + landSel.dy; setLandScale(d.s0 * Math.hypot(p.x - cx, p.y - cy) / Math.max(1, d.d0)); refreshLandProps(); }
+    else if (d.type === 'landRotate' && landSel) { const cx = landSel.cx + landSel.dx, cy = landSel.cy + landSel.dy; let r = d.r0 + ((Math.atan2(p.y - cy, p.x - cx) - d.start) * 180) / Math.PI; if (e.shiftKey) r = Math.round(r / 15) * 15; setLandRot(r); refreshLandProps(); }
   });
   function finishPointer() {
     const d = dragState; dragState = null; if (!d) return;
@@ -702,7 +881,7 @@
     else if (isBrush()) c = 'none';
     else if (tool === 'stamp' || tool === 'line') c = 'crosshair';
     else if (tool === 'text') c = 'text';
-    else { const h = hitHandle(p.x, p.y); if (h) c = h.type === 'rotate' ? 'alias' : 'nwse-resize'; else if (hitTest(p.x, p.y)) c = 'move'; }
+    else { const lh = hitLandHandle(p.x, p.y), h = lh ? null : hitHandle(p.x, p.y); if (lh) c = lh === 'rotate' ? 'alias' : 'nwse-resize'; else if (h) c = h.type === 'rotate' ? 'alias' : 'nwse-resize'; else if (hitTest(p.x, p.y) || (landSel && insideLandBox(p.x, p.y))) c = 'move'; else if (landAt(p.x, p.y)) c = 'pointer'; }
     stage.style.cursor = c;
   }
   // Ramer–Douglas–Peucker
@@ -740,6 +919,10 @@
     }
     if (typing) return;
     if (e.key === ' ') { spaceDown = true; stage.style.cursor = 'grab'; e.preventDefault(); return; }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && landSel) { settleLand(true); return; }
+    if (e.key === 'Escape' && landSel) { settleLand(); return; }
+    if ((e.key === '[' || e.key === ']') && landSel) { setLandScale(landSel.s * (e.key === ']' ? 1.1 : 0.9)); refreshLandProps(); return; }
+    if ((e.key === 'r' || e.key === 'R') && landSel) { setLandRot(landSel.r + (e.shiftKey ? -15 : 15)); refreshLandProps(); return; }
     if (e.key === 'Delete' || e.key === 'Backspace') { if (selection.size) { deleteIds([...selection]); commit(); refreshPanels(); needsDraw = true; } return; }
     if (e.key === 'Escape') { selection.clear(); lineDraft = null; refreshPanels(); needsDraw = true; return; }
     const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
@@ -761,6 +944,7 @@
   // ------------------------------------------------------------------ tools UI
   function isBrush() { return tool === 'land' || tool === 'ocean' || tool === 'path'; }
   function setTool(t) {
+    if (t !== 'select') settleLand();
     tool = t;
     $$('.tool').forEach((b) => b.classList.toggle('active', b.dataset.tool === t));
     renderToolOptions(); needsDraw = true;
@@ -882,8 +1066,33 @@
   // ------------------------------------------------------------------ properties panel
   function refreshPanels() { renderProps(); scheduleUsedList(); if (tool === 'text' && document.activeElement?.id !== 'toText') renderToolOptions(); }
   function propRow(label, html) { return `<div class="row"><label>${label}</label>${html}</div>`; }
+  function refreshLandProps() {
+    if (!landSel) return; const set = (sel_, v) => { const n = $(sel_); if (n && document.activeElement !== n) n.value = v; };
+    set('#lS', Math.round(landSel.s * 100)); set('#lSn', Math.round(landSel.s * 100)); set('#lR', Math.round(landSel.r)); set('#lRn', Math.round(landSel.r));
+  }
   function renderProps() {
     const el = $('#props');
+    if (landSel) {
+      const L = landSel;
+      el.innerHTML = `<div class="row"><b style="flex:1">Landmass</b><span class="muted">${L.items.length} item${L.items.length === 1 ? '' : 's'} on it</span></div>
+        <p class="muted" style="margin:0">Drag to move · drag a corner to resize · round handle to rotate</p>
+        ${propRow('Size %', `<input type="range" id="lS" min="10" max="400" value="${Math.round(L.s * 100)}"><input type="number" id="lSn" min="5" max="1000" value="${Math.round(L.s * 100)}" style="width:66px">`)}
+        ${propRow('Rotation', `<input type="range" id="lR" min="-180" max="180" value="${Math.round(L.r)}"><input type="number" id="lRn" value="${Math.round(L.r)}" style="width:66px">`)}
+        <label class="chk"><input type="checkbox" id="lItems" ${L.withItems ? 'checked' : ''}> Move items on this land with it</label>
+        <div class="btnrow"><button id="lSmaller">Smaller</button><button id="lBigger">Bigger</button><button id="lReset">Reset</button></div>
+        <div class="btnrow"><button class="primary" id="lDone">Done</button><button class="danger" id="lDel">Delete land</button></div>`;
+      $('#lS').oninput = (e) => { setLandScale(+e.target.value / 100); refreshLandProps(); };
+      $('#lSn').onchange = (e) => { setLandScale((+e.target.value || 100) / 100); refreshLandProps(); };
+      $('#lR').oninput = (e) => { setLandRot(+e.target.value); refreshLandProps(); };
+      $('#lRn').onchange = (e) => { setLandRot(+e.target.value || 0); refreshLandProps(); };
+      $('#lItems').onchange = (e) => { L.withItems = e.target.checked; applyLandItems(); };
+      $('#lSmaller').onclick = () => { setLandScale(L.s * 0.9); refreshLandProps(); };
+      $('#lBigger').onclick = () => { setLandScale(L.s * 1.1); refreshLandProps(); };
+      $('#lReset').onclick = () => { L.s = 1; L.r = 0; L.dx = 0; L.dy = 0; applyLandItems(); refreshLandProps(); };
+      $('#lDone').onclick = () => settleLand();
+      $('#lDel').onclick = () => settleLand(true);
+      return;
+    }
     const sel = [...selection].map(findObj).filter(Boolean);
     if (!sel.length) {
       const g = doc.grid;
@@ -896,7 +1105,7 @@
         ${propRow('Grid', `<select id="pGrid"><option value="none">None</option><option value="square" ${g.type === 'square' ? 'selected' : ''}>Square</option><option value="hex" ${g.type === 'hex' ? 'selected' : ''}>Hex</option></select>`)}
         ${propRow('Cell size', `<input type="number" id="pGridSize" min="10" max="500" value="${g.size}"> px`)}
         ${propRow('Colour', `<input type="color" id="pGridCol" value="${g.color}"><input type="range" id="pGridOp" min="0.05" max="1" step="0.05" value="${g.opacity}">`)}
-        <p class="muted">Suggested order: paint land with the <b>Land</b> and <b>Ocean</b> brushes, add mountains, forests and towns, then finish with <b>Text</b>. Labels always sit on top of everything else.</p>`;
+        <p class="muted">Suggested order: paint land with the <b>Land</b> and <b>Ocean</b> brushes, add mountains, forests and towns, then finish with <b>Text</b>. Labels always sit on top of everything else.<br>With the <b>Select</b> tool, click any land to select that landmass, then drag its corners to make it bigger or smaller.</p>`;
       $('#pName').onchange = (e) => { doc.name = e.target.value || 'Untitled Map'; commit(); };
       $('#pType').onchange = (e) => { doc.type = e.target.value; ui.kind = MAP_TYPES[doc.type].kind; baseDirty = true; buildLibrary(); commit(); needsDraw = true; };
       $('#pAllLand').onclick = () => { fillMask(landMask, true); baseDirty = true; commit(); needsDraw = true; };
@@ -1089,6 +1298,7 @@
     });
   }
   function resizeMap(W, H, mode, anchor) {
+    settleLand();
     const oldW = doc.width, oldH = doc.height, oldLand = landMask, oldPath = pathMask;
     let dx = 0, dy = 0, sx = 1, sy = 1;
     if (mode === 'scale') { sx = W / oldW; sy = H / oldH; }
@@ -1142,6 +1352,7 @@
     return cv;
   }
   async function exportImage(fmt, s = 1, q = 0.92, grid = true) {
+    settleLand();
     status('Rendering export…');
     await new Promise((r) => setTimeout(r, 30));
     const cv = await renderExportCanvas(s, grid);
@@ -1167,12 +1378,13 @@
       <div class="actions"><button class="primary" id="cOk">Close</button></div>`, (d) => { d.querySelector('#cOk').onclick = closeDialog; });
   }
   function shortcutsDialog() {
-    const rows = [['V / S / B / E / P / L / T / H', 'Select · Stamp · Land brush · Ocean brush · Ground · Lines · Text · Pan'], ['Space + drag, middle mouse', 'Pan'], ['Mouse wheel', 'Zoom'], ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'], ['Ctrl+D', 'Duplicate'], ['Alt + drag', 'Duplicate while moving'], ['Delete', 'Delete selection'], ['R / Shift+R', 'Rotate ±15°'], ['F', 'Flip asset'], ['[ / ]', 'Brush size, or scale selection'], ['Arrows (+Shift)', 'Nudge 1px (10px)'], ['Shift while rotating', 'Snap to 15°'], ['Alt while painting', 'Swap Land ↔ Ocean brush']];
+    const rows = [['V / S / B / E / P / L / T / H', 'Select · Stamp · Land brush · Ocean brush · Ground · Lines · Text · Pan'], ['Space + drag, middle mouse', 'Pan'], ['Mouse wheel', 'Zoom'], ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'], ['Ctrl+D', 'Duplicate'], ['Alt + drag', 'Duplicate while moving'], ['Delete', 'Delete selection'], ['R / Shift+R', 'Rotate ±15°'], ['F', 'Flip asset'], ['Click land (Select tool)', 'Select a whole landmass to move, resize or rotate'], ['[ / ]', 'Brush size, or scale selection'], ['Arrows (+Shift)', 'Nudge 1px (10px)'], ['Shift while rotating', 'Snap to 15°'], ['Alt while painting', 'Swap Land ↔ Ocean brush']];
     openDialog(`<h2>Keyboard shortcuts</h2><table>${rows.map(([k, v]) => `<tr><td><kbd>${k}</kbd></td><td>${v}</td></tr>`).join('')}</table><div class="actions"><button class="primary" id="kOk">Close</button></div>`, (d) => { d.querySelector('#kOk').onclick = closeDialog; });
   }
 
   // ------------------------------------------------------------------ save / open
   function serialize() {
+    settleLand();
     return JSON.stringify({ ...doc, landMask: landMask.toDataURL('image/png'), pathMask: pathMask.toDataURL('image/png') });
   }
   async function loadImageToMask(mask, url) {
@@ -1180,6 +1392,7 @@
     const c = mask.getContext('2d'); c.clearRect(0, 0, mask.width, mask.height); c.drawImage(im, 0, 0, mask.width, mask.height);
   }
   async function deserialize(text) {
+    landSel = null;
     const d = JSON.parse(text);
     if (d.app !== 'Pocket-Mapp-Creator' && d.app !== 'Mapp-Creator') throw new Error('Not a Pocket-Mapp-Creator map file');
     d.app = 'Pocket-Mapp-Creator';
@@ -1244,6 +1457,7 @@
     document.title = `Pocket-Mapp-Creator — ${doc.name}`;
   }
   $('#styleSelect').onchange = (e) => {
+    settleLand();
     const prev = doc.style; doc.style = e.target.value;
     // keep ink-coloured labels readable when switching styles
     for (const o of doc.objects) if (o.t === 'text' && o.color === INK[prev]) o.color = INK[doc.style];
@@ -1375,7 +1589,23 @@
     const before = doc.objects.length; undo(); const afterUndo = Math.round(findObj(castle.id)?.r); redo(); const afterRedo = Math.round(findObj(castle.id)?.r);
     await wait(1500); await whenImagesReady(); await shot('08-interactions');
     const pineCount = doc.objects.filter((o) => o.a === 'pine').length;
-    document.title = `TESTDONE label=${window.__label} landStart=${window.__landStart} objs=${before} pines=${pineCount} rotated=${rotated} undoR=${afterUndo} redoR=${afterRedo} sel=${castle.a} png=${window.__exportPng}`;
+    // landmass selection: pick the island, scale it up 1.5x, check land area and items followed
+    const area = () => { const d = landMask.getContext('2d').getImageData(0, 0, landMask.width, landMask.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 127) n++; return n; };
+    const a0 = area(); setTool('select'); selection.clear(); refreshPanels();
+    const pine0 = doc.objects.find((o) => o.a === 'pine'); const px0 = pine0.x;
+    ev('pointerdown', 700, 760); ev('pointerup', 700, 760);
+    const picked = !!landSel; const nItems = landSel ? landSel.items.length : -1;
+    const cs = landCorners(); const L = landSel; const cx = L.cx, cy = L.cy;
+    const k = [cs[2][0] + (cs[2][0] - cx) * 0.5, cs[2][1] + (cs[2][1] - cy) * 0.5];
+    ev('pointerdown', cs[2][0], cs[2][1]); ev('pointermove', k[0], k[1]); ev('pointerup', k[0], k[1]);
+    const sAfter = landSel ? landSel.s.toFixed(2) : 'none';
+    await wait(300); await shot('09-land-selected');
+    ev('pointerdown', 60, 60); ev('pointerup', 60, 60); // click sea to finish
+    const a1 = area();
+    window.__land = `picked=${picked} items=${nItems} scale=${sAfter} area=${(a1 / a0).toFixed(2)} pineMoved=${Math.round(pine0.x - px0)}`;
+    undo(); const a2 = area(); window.__land += ` undoArea=${(a2 / a0).toFixed(2)}`; redo();
+    await wait(1500); await shot('10-land-resized');
+    document.title = `TESTDONE ${window.__land} label=${window.__label} landStart=${window.__landStart} objs=${before} pines=${pineCount} rotated=${rotated} undoR=${afterUndo} redoR=${afterRedo} sel=${castle.a} png=${window.__exportPng}`;
   }
   boot();
 })();
