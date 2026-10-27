@@ -122,3 +122,10 @@ label { color: var(--muted); }
 .dialog td, .dialog th { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; }
 kbd { background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 12px; }
 ::-webkit-scrollbar { width: 10px; } ::-webkit-scrollbar-thumb { background: #3d3329; border-radius: 6px; } ::-webkit-scrollbar-track { background: transparent; }
+
+/* tool options bar: wrap neatly instead of squashing controls */
+#toolOptions { flex-wrap: wrap; justify-content: center; max-width: calc(100% - 24px); row-gap: 6px; }
+#toolOptions > * { flex: none; white-space: nowrap; }
+#toolOptions input[type=color] { width: 34px; height: 26px; }
+#toolOptions select { max-width: 170px; }
+#topbar button { white-space: nowrap; }

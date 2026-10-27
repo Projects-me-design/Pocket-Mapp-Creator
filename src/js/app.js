@@ -37,6 +37,7 @@
     brush: 60, brushMode: 'add', rough: true,
     scatter: false, spacing: 1, randScale: 0.15, randRot: 0, randFlip: true, stampScale: 1, depthSort: true,
     lineKind: 'river', lineWidth: 6,
+    textFont: 'IM Fell English', textSize: 60, textColor: null, textBold: false, textItalic: false,
     genre: 'fantasy', kind: 'all', search: ''
   };
   const imgCache = new Map();
@@ -80,7 +81,7 @@
   function newMap(o) {
     doc = makeDoc(o);
     allocMasks(doc.width, doc.height);
-    const start = o.start || (doc.type === 'world' ? 'generate' : 'land');
+    const start = o.start || 'sea'; // every new map starts as open ocean; the user paints the land
     if (start === 'generate' || start === 'example') MT.generateLand(landMask, doc.seed, 0.44);
     else if (start === 'land') fillMask(landMask, true);
     else fillMask(landMask, false);
@@ -88,6 +89,7 @@
     filePath = null;
     selection.clear();
     ui.kind = MAP_TYPES[doc.type].kind;
+    ui.textSize = Math.round(Math.min(doc.width, doc.height) / 30); ui.textColor = null;
     syncTopbar(); buildLibrary();
     resetHistory();
     baseDirty = true;
@@ -303,8 +305,10 @@
     if (baseCanvas) ctx.drawImage(baseCanvas, 0, 0, doc.width, doc.height);
     else { ctx.fillStyle = PAPER[doc.style]; ctx.fillRect(0, 0, doc.width, doc.height); }
     if (opts.grid !== false) drawGrid(ctx);
-    for (const o of doc.objects) drawObject(ctx, o);
+    for (const o of doc.objects) if (o.t !== 'text') drawObject(ctx, o);
     drawBorder(ctx);
+    // labels are always drawn last so land, assets and lines never cover them
+    for (const o of doc.objects) if (o.t === 'text') drawObject(ctx, o);
   }
 
   // ------------------------------------------------------------------ stage render loop
@@ -335,7 +339,7 @@
       const x = Math.min(marquee.x0, marquee.x1), y = Math.min(marquee.y0, marquee.y1);
       ctx.fillRect(x, y, Math.abs(marquee.x1 - marquee.x0), Math.abs(marquee.y1 - marquee.y0)); ctx.strokeRect(x, y, Math.abs(marquee.x1 - marquee.x0), Math.abs(marquee.y1 - marquee.y0)); ctx.restore();
     }
-    if (hoverPt && (tool === 'land' || tool === 'path')) {
+    if (hoverPt && (isBrush())) {
       ctx.save(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5 / view.zoom; ctx.beginPath(); ctx.arc(hoverPt.x, hoverPt.y, ui.brush / 2, 0, Math.PI * 2); ctx.stroke();
       ctx.strokeStyle = '#000'; ctx.setLineDash([4 / view.zoom, 4 / view.zoom]); ctx.stroke(); ctx.restore();
     }
@@ -404,7 +408,8 @@
     return Math.abs(lx) <= w / 2 && Math.abs(ly) <= h / 2;
   }
   function hitTest(x, y) {
-    for (let i = doc.objects.length - 1; i >= 0; i--) if (hitObj(doc.objects[i], x, y)) return doc.objects[i];
+    for (let i = doc.objects.length - 1; i >= 0; i--) if (doc.objects[i].t === 'text' && hitObj(doc.objects[i], x, y)) return doc.objects[i];
+    for (let i = doc.objects.length - 1; i >= 0; i--) if (doc.objects[i].t !== 'text' && hitObj(doc.objects[i], x, y)) return doc.objects[i];
     return null;
   }
   function hitHandle(x, y) {
@@ -472,7 +477,7 @@
     return o;
   }
   function addText(x, y, props = {}) {
-    const o = Object.assign({ id: uid(), t: 'text', text: 'New Label', x, y, s: 1, r: 0, o: 1, font: 'IM Fell English', size: Math.round(Math.min(doc.width, doc.height) / 30), color: INK[doc.style], halo: true, bold: false, italic: false, upper: false, spacing: 2, curve: 0 }, props);
+    const o = Object.assign({ id: uid(), t: 'text', text: 'New Label', x, y, s: 1, r: 0, o: 1, font: ui.textFont, size: ui.textSize || Math.round(Math.min(doc.width, doc.height) / 30), color: ui.textColor || INK[doc.style], halo: true, bold: ui.textBold, italic: ui.textItalic, upper: false, spacing: 2, curve: 0 }, props);
     doc.objects.push(o); return o;
   }
   function deleteIds(ids) {
@@ -574,7 +579,11 @@
     const p = toMap(e);
     if (e.button === 1 || e.button === 2 && tool !== 'select' || spaceDown || tool === 'pan') { dragState = { type: 'pan', sx: p.sx, sy: p.sy, ox: view.ox, oy: view.oy }; return; }
     if (e.button !== 0) return;
-    if (tool === 'land' || tool === 'path') { startPaint(p, tool, ui.brushMode === 'erase' || e.altKey); dragState = { type: 'paint' }; return; }
+    if (isBrush()) {
+      // Land brush adds land, Ocean brush turns land back into sea; Alt swaps them
+      const erase = tool === 'ocean' ? !e.altKey : tool === 'land' ? e.altKey : (ui.brushMode === 'erase' || e.altKey);
+      startPaint(p, tool === 'path' ? 'path' : 'land', erase); dragState = { type: 'paint' }; return;
+    }
     if (tool === 'stamp') {
       if (!stampKey) { status('Choose an asset from the library first'); return; }
       const o = placeStamp(p.x, p.y);
@@ -584,10 +593,16 @@
     if (tool === 'line') { lineDraft = { t: 'line', kind: ui.lineKind, w: ui.lineWidth, o: 1, pts: [[p.x, p.y]] }; dragState = { type: 'line' }; return; }
     if (tool === 'text') {
       const hit = hitTest(p.x, p.y);
-      if (hit && hit.t === 'text') { selection.clear(); selection.add(hit.id); }
-      else { const t = addText(p.x, p.y); selection.clear(); selection.add(t.id); commit(); }
+      if (hit && hit.t === 'text') {
+        // click a label to pick it up and drag it to a new location
+        selection.clear(); selection.add(hit.id);
+        dragState = { type: 'move', last: p, moved: false };
+        refreshPanels(); needsDraw = true;
+        return;
+      }
+      const t = addText(p.x, p.y); selection.clear(); selection.add(t.id); commit();
       refreshPanels(); needsDraw = true;
-      setTimeout(() => { const ta = $('#propText'); if (ta) { ta.focus(); ta.select(); } }, 30);
+      setTimeout(() => { const ta = $('#toText'); if (ta) { ta.focus(); ta.select(); } }, 30);
       return;
     }
     // select tool
@@ -626,7 +641,7 @@
 
   stage.addEventListener('pointermove', (e) => {
     const p = toMap(e); hoverPt = p;
-    if (tool === 'land' || tool === 'path' || tool === 'stamp') needsDraw = true;
+    if (isBrush() || tool === 'stamp') needsDraw = true;
     status(`${Math.round(p.x)}, ${Math.round(p.y)}${doc.grid.type === 'square' ? `  ·  square ${Math.floor(p.x / doc.grid.size) + 1}, ${Math.floor(p.y / doc.grid.size) + 1}` : ''}`, true);
     if (!dragState) { updateCursor(p); return; }
     const d = dragState;
@@ -684,7 +699,7 @@
   function updateCursor(p) {
     let c = 'default';
     if (tool === 'pan' || spaceDown) c = 'grab';
-    else if (tool === 'land' || tool === 'path') c = 'none';
+    else if (isBrush()) c = 'none';
     else if (tool === 'stamp' || tool === 'line') c = 'crosshair';
     else if (tool === 'text') c = 'text';
     else { const h = hitHandle(p.x, p.y); if (h) c = h.type === 'rotate' ? 'alias' : 'nwse-resize'; else if (hitTest(p.x, p.y)) c = 'move'; }
@@ -731,19 +746,20 @@
     if (arrows[e.key] && selection.size) { const m = e.shiftKey ? 10 : 1; for (const id of selection) moveObj(findObj(id), arrows[e.key][0] * m, arrows[e.key][1] * m); commit(); refreshPropsValues(); needsDraw = true; e.preventDefault(); return; }
     if (e.key === '[' || e.key === ']') {
       const dir = e.key === ']' ? 1 : -1;
-      if (tool === 'land' || tool === 'path') { ui.brush = clamp(ui.brush + dir * 10, 4, 600); renderToolOptions(); needsDraw = true; }
+      if (isBrush()) { ui.brush = clamp(ui.brush + dir * 10, 4, 600); renderToolOptions(); needsDraw = true; }
       else if (selection.size) { for (const id of selection) { const o = findObj(id); if (o.t !== 'line') o.s = clamp(o.s * (dir > 0 ? 1.1 : 0.9), 0.05, 20); } commit(); refreshPropsValues(); needsDraw = true; }
       return;
     }
     if ((e.key === 'r' || e.key === 'R') && selection.size) { for (const id of selection) { const o = findObj(id); if (o.t !== 'line') o.r = ((o.r + (e.shiftKey ? -15 : 15) + 540) % 360) - 180; } commit(); refreshPropsValues(); needsDraw = true; return; }
     if ((e.key === 'f' || e.key === 'F') && selection.size) { for (const id of selection) { const o = findObj(id); if (o.t === 'asset') o.fx = !o.fx; } commit(); needsDraw = true; return; }
-    const map = { v: 'select', s: 'stamp', b: 'land', p: 'path', l: 'line', t: 'text', h: 'pan' };
+    const map = { v: 'select', s: 'stamp', b: 'land', e: 'ocean', p: 'path', l: 'line', t: 'text', h: 'pan' };
     if (map[e.key.toLowerCase()]) setTool(map[e.key.toLowerCase()]);
   });
   window.addEventListener('keyup', (e) => { if (e.key === ' ') { spaceDown = false; stage.style.cursor = ''; } });
   function selectAll() { selection.clear(); doc.objects.forEach((o) => !o.locked && !o.hidden && selection.add(o.id)); refreshPanels(); needsDraw = true; }
 
   // ------------------------------------------------------------------ tools UI
+  function isBrush() { return tool === 'land' || tool === 'ocean' || tool === 'path'; }
   function setTool(t) {
     tool = t;
     $$('.tool').forEach((b) => b.classList.toggle('active', b.dataset.tool === t));
@@ -753,13 +769,14 @@
 
   function renderToolOptions() {
     const el = $('#toolOptions');
-    if (tool === 'land' || tool === 'path') {
+    if (isBrush()) {
+      const title = tool === 'land' ? 'Land brush — paint land' : tool === 'ocean' ? 'Ocean brush — turn land into sea' : 'Ground / path brush';
       el.innerHTML = `
-        <b>${tool === 'land' ? 'Land brush' : 'Ground / path brush'}</b>
-        <div class="seg"><button data-bm="add" class="${ui.brushMode === 'add' ? 'on' : ''}">${tool === 'land' ? 'Add land' : 'Paint'}</button><button data-bm="erase" class="${ui.brushMode === 'erase' ? 'on' : ''}">${tool === 'land' ? 'Add water' : 'Erase'}</button></div>
+        <b>${title}</b>
+        ${tool === 'path' ? `<div class="seg"><button data-bm="add" class="${ui.brushMode === 'add' ? 'on' : ''}">Paint</button><button data-bm="erase" class="${ui.brushMode === 'erase' ? 'on' : ''}">Erase</button></div>` : ''}
         <label>Size <input type="range" id="toBrush" min="4" max="600" value="${ui.brush}"> <span id="toBrushV">${ui.brush}</span></label>
         <label class="chk"><input type="checkbox" id="toRough" ${ui.rough ? 'checked' : ''}> Rough edge</label>
-        <span class="muted">Alt = ${tool === 'land' ? 'water' : 'erase'} · [ ] size</span>`;
+        <span class="muted">${tool === 'land' ? 'Alt = ocean' : tool === 'ocean' ? 'Alt = land' : 'Alt = erase'} · [ ] size</span>`;
       el.querySelectorAll('[data-bm]').forEach((b) => b.onclick = () => { ui.brushMode = b.dataset.bm; renderToolOptions(); });
       $('#toBrush').oninput = (e) => { ui.brush = +e.target.value; $('#toBrushV').textContent = ui.brush; };
       $('#toRough').onchange = (e) => { ui.rough = e.target.checked; };
@@ -791,7 +808,36 @@
       $('#toKind').onchange = (e) => { ui.lineKind = e.target.value; };
       $('#toLW').oninput = (e) => { ui.lineWidth = +e.target.value; $('#toLWV').textContent = ui.lineWidth; };
     } else if (tool === 'text') {
-      el.innerHTML = '<b>Text</b><span class="muted">Click the map to add a label · double-click a label to edit</span>';
+      const sel = selection.size === 1 ? findObj([...selection][0]) : null;
+      const t = sel && sel.t === 'text' ? sel : null;
+      const font = t ? t.font : ui.textFont;
+      const size = t ? Math.round(t.size * t.s) : (ui.textSize || 60);
+      const color = t ? t.color : (ui.textColor || INK[doc.style]);
+      const bold = t ? t.bold : ui.textBold, italic = t ? t.italic : ui.textItalic;
+      el.innerHTML = `
+        <b>${t ? 'Edit label' : 'Text'}</b>
+        ${t ? `<input type="text" id="toText" value="${esc(t.text)}" style="width:170px">` : ''}
+        <select id="toFont">${FONTS.map((f) => `<option ${f === font ? 'selected' : ''}>${f}</option>`).join('')}</select>
+        <label>Size <input type="range" id="toTSize" min="8" max="400" value="${size}"><input type="number" id="toTSizeN" min="6" max="600" value="${size}" style="width:62px"></label>
+        <input type="color" id="toTColor" value="${color}" title="Colour">
+        <label class="chk"><input type="checkbox" id="toTBold" ${bold ? 'checked' : ''}> B</label>
+        <label class="chk"><input type="checkbox" id="toTItal" ${italic ? 'checked' : ''}> <i>I</i></label>
+        <span class="muted">${t ? 'Drag the label to move it' : 'Pick a font and size, then click the map'}</span>`;
+      const apply = (fn, done) => { fn(); if (t) { needsDraw = true; if (done) { commit(); renderProps(); } } };
+      const setSize = (v) => { v = clamp(+v || 12, 6, 600); ui.textSize = v; if (t) { t.size = v; t.s = 1; } $('#toTSize').value = v; $('#toTSizeN').value = v; };
+      $('#toFont').onchange = (e) => apply(() => { ui.textFont = e.target.value; if (t) t.font = e.target.value; }, true);
+      $('#toTSize').oninput = (e) => apply(() => setSize(e.target.value));
+      $('#toTSize').onchange = () => apply(() => {}, true);
+      $('#toTSizeN').onchange = (e) => apply(() => setSize(e.target.value), true);
+      $('#toTColor').oninput = (e) => apply(() => { ui.textColor = e.target.value; if (t) t.color = e.target.value; });
+      $('#toTColor').onchange = () => apply(() => {}, true);
+      $('#toTBold').onchange = (e) => apply(() => { ui.textBold = e.target.checked; if (t) t.bold = e.target.checked; }, true);
+      $('#toTItal').onchange = (e) => apply(() => { ui.textItalic = e.target.checked; if (t) t.italic = e.target.checked; }, true);
+      if (t) {
+        $('#toText').oninput = (e) => { t.text = e.target.value; needsDraw = true; };
+        $('#toText').onchange = () => { commit(); renderProps(); };
+        $('#toText').onkeydown = (e) => { if (e.key === 'Enter') e.target.blur(); };
+      }
     } else el.innerHTML = '';
   }
 
@@ -834,7 +880,7 @@
   }
 
   // ------------------------------------------------------------------ properties panel
-  function refreshPanels() { renderProps(); scheduleUsedList(); }
+  function refreshPanels() { renderProps(); scheduleUsedList(); if (tool === 'text' && document.activeElement?.id !== 'toText') renderToolOptions(); }
   function propRow(label, html) { return `<div class="row"><label>${label}</label>${html}</div>`; }
   function renderProps() {
     const el = $('#props');
@@ -845,15 +891,14 @@
         ${propRow('Name', `<input type="text" id="pName" value="${esc(doc.name)}">`)}
         ${propRow('Type', `<select id="pType">${Object.entries(MAP_TYPES).map(([k, v]) => `<option value="${k}" ${k === doc.type ? 'selected' : ''}>${v.label}</option>`).join('')}</select>`)}
         <div class="row"><label>Size</label><span>${doc.width} × ${doc.height}px</span><button class="mini" data-cmd="resize">Change…</button></div>
-        <div class="btnrow"><button class="mini" id="pGenLand">New random land</button><button class="mini" id="pAllLand">All land</button><button class="mini" id="pAllSea">All water</button><button class="mini" id="pClearPaths">Clear ground paint</button></div>
+        <div class="btnrow"><button class="mini" id="pAllLand">Fill with land</button><button class="mini" id="pAllSea">Clear all land</button><button class="mini" id="pClearPaths">Clear ground paint</button></div>
         <div class="panel-sub muted">Grid</div>
         ${propRow('Grid', `<select id="pGrid"><option value="none">None</option><option value="square" ${g.type === 'square' ? 'selected' : ''}>Square</option><option value="hex" ${g.type === 'hex' ? 'selected' : ''}>Hex</option></select>`)}
         ${propRow('Cell size', `<input type="number" id="pGridSize" min="10" max="500" value="${g.size}"> px`)}
         ${propRow('Colour', `<input type="color" id="pGridCol" value="${g.color}"><input type="range" id="pGridOp" min="0.05" max="1" step="0.05" value="${g.opacity}">`)}
-        <p class="muted">Tip: pick an asset and use the <b>Scatter brush</b> to paint whole forests and mountain ranges.</p>`;
+        <p class="muted">Suggested order: paint land with the <b>Land</b> and <b>Ocean</b> brushes, add mountains, forests and towns, then finish with <b>Text</b>. Labels always sit on top of everything else.</p>`;
       $('#pName').onchange = (e) => { doc.name = e.target.value || 'Untitled Map'; commit(); };
       $('#pType').onchange = (e) => { doc.type = e.target.value; ui.kind = MAP_TYPES[doc.type].kind; baseDirty = true; buildLibrary(); commit(); needsDraw = true; };
-      $('#pGenLand').onclick = () => { doc.seed = Math.floor(Math.random() * 1e6); MT.generateLand(landMask, doc.seed, 0.44); baseDirty = true; commit(); needsDraw = true; };
       $('#pAllLand').onclick = () => { fillMask(landMask, true); baseDirty = true; commit(); needsDraw = true; };
       $('#pAllSea').onclick = () => { fillMask(landMask, false); baseDirty = true; commit(); needsDraw = true; };
       $('#pClearPaths').onclick = () => { fillMask(pathMask, false); baseDirty = true; commit(); needsDraw = true; };
@@ -1012,9 +1057,7 @@
         <div class="row"><label>Preset</label><select id="nPreset">${T.sizes.map(([w, h]) => `<option value="${w}x${h}">${w} × ${h}${type === 'battle' ? ` (${w / 70} × ${h / 70} squares)` : ''}</option>`).join('')}<option value="custom">Custom…</option></select></div>
         <div class="row"><label>Width × Height</label><input type="number" id="nW" value="${T.sizes[0][0]}" min="200" max="8000"> × <input type="number" id="nH" value="${T.sizes[0][1]}" min="200" max="8000"> px</div>
         <div class="row"><label>Name</label><input type="text" id="nName" value="${type === 'battle' ? 'Battle Map' : type === 'town' ? 'Town Map' : 'The Known World'}"></div>
-        <div class="row"><label>Start with</label><select id="nStart">
-          ${type === 'world' ? '<option value="generate">Random continents</option><option value="example">Example map (Tolkien-style)</option><option value="sea">Empty sea</option><option value="land">All land</option>' : '<option value="land">Open ground</option><option value="sea">All water</option>'}
-        </select></div>
+        <p class="muted">Your map starts as open ocean. Use the <b>Land</b> brush to paint land in any shape, and the <b>Ocean</b> brush to carve it back into sea.</p>
         <div class="actions">${first ? '<button data-cmd="open">Open existing…</button>' : '<button id="nCancel">Cancel</button>'}<button class="primary" id="nCreate">Create map</button></div>`, (d) => {
         d.querySelectorAll('[data-type]').forEach((c) => c.onclick = () => { type = c.dataset.type; render(); });
         d.querySelectorAll('[data-style]').forEach((c) => c.onclick = () => { style = c.dataset.style; d.querySelectorAll('[data-style]').forEach((x) => x.classList.toggle('on', x === c)); });
@@ -1024,7 +1067,7 @@
         d.querySelector('#nCreate').onclick = () => {
           const w = clamp(+d.querySelector('#nW').value || 2000, 200, 8000), h = clamp(+d.querySelector('#nH').value || 1400, 200, 8000);
           closeDialog();
-          newMap({ type, style, width: w, height: h, name: d.querySelector('#nName').value, start: d.querySelector('#nStart').value });
+          newMap({ type, style, width: w, height: h, name: d.querySelector('#nName').value, start: 'sea' });
         };
       });
     };
@@ -1124,7 +1167,7 @@
       <div class="actions"><button class="primary" id="cOk">Close</button></div>`, (d) => { d.querySelector('#cOk').onclick = closeDialog; });
   }
   function shortcutsDialog() {
-    const rows = [['V / S / B / P / L / T / H', 'Select · Stamp · Land · Ground · Lines · Text · Pan'], ['Space + drag, middle mouse', 'Pan'], ['Mouse wheel', 'Zoom'], ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'], ['Ctrl+D', 'Duplicate'], ['Alt + drag', 'Duplicate while moving'], ['Delete', 'Delete selection'], ['R / Shift+R', 'Rotate ±15°'], ['F', 'Flip asset'], ['[ / ]', 'Brush size, or scale selection'], ['Arrows (+Shift)', 'Nudge 1px (10px)'], ['Shift while rotating', 'Snap to 15°'], ['Alt while painting', 'Erase / paint water']];
+    const rows = [['V / S / B / E / P / L / T / H', 'Select · Stamp · Land brush · Ocean brush · Ground · Lines · Text · Pan'], ['Space + drag, middle mouse', 'Pan'], ['Mouse wheel', 'Zoom'], ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'], ['Ctrl+D', 'Duplicate'], ['Alt + drag', 'Duplicate while moving'], ['Delete', 'Delete selection'], ['R / Shift+R', 'Rotate ±15°'], ['F', 'Flip asset'], ['[ / ]', 'Brush size, or scale selection'], ['Arrows (+Shift)', 'Nudge 1px (10px)'], ['Shift while rotating', 'Snap to 15°'], ['Alt while painting', 'Swap Land ↔ Ocean brush']];
     openDialog(`<h2>Keyboard shortcuts</h2><table>${rows.map(([k, v]) => `<tr><td><kbd>${k}</kbd></td><td>${v}</td></tr>`).join('')}</table><div class="actions"><button class="primary" id="kOk">Close</button></div>`, (d) => { d.querySelector('#kOk').onclick = closeDialog; });
   }
 
@@ -1266,8 +1309,8 @@
   async function boot() {
     await document.fonts.load('30px "IM Fell English"').catch(() => {});
     if (api && api.testMode) { await runTest(api.testMode); return; }
-    newMap({ type: 'world', style: 'parchment', start: 'example', name: 'The Known World', seed: 7 });
-    renderToolOptions();
+    newMap({ type: 'world', style: 'parchment', start: 'sea', name: 'The Known World' });
+    setTool('land');
     loop();
     setTimeout(() => newMapDialog(true), 50);
   }
@@ -1305,21 +1348,26 @@
     // save / load round trip
     const data = serialize(); await deserialize(data); await wait(2000); await shot('07-roundtrip');
     // interaction test with synthetic pointer events
-    newMap({ type: 'world', style: 'parchment', start: 'sea', name: 'Interaction Test', width: 2000, height: 1400 });
+    newMap({ type: 'world', style: 'parchment', name: 'Interaction Test', width: 2000, height: 1400 });
     await wait(500);
+    window.__landStart = landMask.getContext('2d').getImageData(0, 0, landMask.width, landMask.height).data.some((v, i) => i % 4 === 3 && v > 0) ? 'HAS_LAND' : 'empty';
     const r = stage.getBoundingClientRect();
     const ev = (type, mx, my, extra = {}) => { const sx = r.left + view.ox + mx * view.zoom, sy = r.top + view.oy + my * view.zoom; stage.dispatchEvent(new PointerEvent(type, { clientX: sx, clientY: sy, button: 0, buttons: type === 'pointerup' ? 0 : 1, pointerId: 1, bubbles: true, ...extra })); };
     const stroke = (pts) => { ev('pointerdown', ...pts[0]); for (const p of pts.slice(1)) ev('pointermove', ...p); ev('pointerup', ...pts[pts.length - 1]); };
     setTool('land'); ui.brush = 260;
     const blob = []; for (let a = 0; a < 6.3; a += 0.15) blob.push([1000 + Math.cos(a) * 420, 700 + Math.sin(a) * 280]);
     stroke(blob); stroke([[900, 700], [1100, 700], [1000, 620], [1000, 780]]);
-    ui.brushMode = 'erase'; ui.brush = 120; stroke([[1000, 700], [1050, 720]]); ui.brushMode = 'add';
+    setTool('ocean'); ui.brush = 120; stroke([[1000, 700], [1050, 720]]);
     setTool('stamp'); stampKey = 'pine'; ui.scatter = true; ui.stampScale = 0.5; ui.randFlip = true;
     stroke([[760, 600], [800, 620], [840, 600], [880, 640], [920, 610], [960, 640], [1000, 600]]);
     ui.scatter = false; stampKey = 'castle'; ui.stampScale = 0.8; stroke([[1180, 760]]);
     setTool('line'); ui.lineKind = 'river'; ui.lineWidth = 10; stroke([[1300, 600], [1340, 650], [1330, 720], [1380, 790], [1450, 900], [1500, 960]]);
-    setTool('text'); ev('pointerdown', 1180, 860); ev('pointerup', 1180, 860);
+    setTool('text'); ui.textFont = 'Cinzel'; ui.textSize = 70; ev('pointerdown', 1180, 860); ev('pointerup', 1180, 860);
     const label = doc.objects[doc.objects.length - 1]; label.text = 'Castle Rock'; label.curve = 0;
+    ev('pointerdown', 1180, 860); ev('pointermove', 1100, 520); ev('pointerup', 1100, 520);
+    $('#toTSizeN').value = 90; $('#toTSizeN').onchange({ target: $('#toTSizeN') });
+    window.__label = `${label.font}/${label.size}/${Math.round(label.x)},${Math.round(label.y)}`;
+    stampKey = 'mountain'; setTool('stamp'); ui.stampScale = 1; stroke([[1100, 520]]);
     selection.clear(); setTool('select'); ev('pointerdown', 1180, 760); ev('pointerup', 1180, 760);
     const castle = findObj([...selection][0]);
     const hp = handlePositions(castle); ev('pointerdown', hp.rot[0], hp.rot[1]); ev('pointermove', hp.rot[0] + 80, hp.rot[1] + 20); ev('pointerup', hp.rot[0] + 80, hp.rot[1] + 20);
@@ -1327,7 +1375,7 @@
     const before = doc.objects.length; undo(); const afterUndo = Math.round(findObj(castle.id)?.r); redo(); const afterRedo = Math.round(findObj(castle.id)?.r);
     await wait(1500); await whenImagesReady(); await shot('08-interactions');
     const pineCount = doc.objects.filter((o) => o.a === 'pine').length;
-    document.title = `TESTDONE objs=${before} pines=${pineCount} rotated=${rotated} undoR=${afterUndo} redoR=${afterRedo} sel=${castle.a} png=${window.__exportPng}`;
+    document.title = `TESTDONE label=${window.__label} landStart=${window.__landStart} objs=${before} pines=${pineCount} rotated=${rotated} undoR=${afterUndo} redoR=${afterRedo} sel=${castle.a} png=${window.__exportPng}`;
   }
   boot();
 })();

@@ -23,9 +23,9 @@ Make Tolkien-style parchment world maps, towns and villages, and top-down RPG ba
 - Adjustable map size (presets or custom up to 8000 × 8000) — resize later by extending/cropping or by scaling everything
 - Every asset can be moved, **rotated** (handle, R key, or slider) and **scaled** (corner handles, [ ] keys, or slider), flipped, layered, faded
 - **Scatter brush** to paint whole forests or mountain ranges with random size, rotation and flip
-- **Land brush** (add land / add water) with automatic inked coastlines; **Ground brush** for roads, dirt and clearings
+- Every new map starts as **open ocean**. Paint land in any shape with the **Land brush** (B), and turn land back into sea with the **Ocean brush** (E). Coastlines are inked automatically. The **Ground brush** paints roads, dirt and clearings
 - **Line tool** for tapering rivers, dashed roads, dotted trails, dash-dot borders and walls
-- **Text labels** with 8 bundled map fonts, halo, letter-spacing, CAPS, and **curved text**
+- **Text labels**: pick a font, size and colour in the Text tool bar, then click where the label should go. Drag a label to move it and resize it from the same bar. 8 bundled map fonts, halo, letter-spacing, CAPS and **curved text**. Labels always sit on top of land, assets and lines
 - **Assets used** panel — every asset type on the map with its count; select all copies, hide them, or delete all copies in one click; expand to jump to individual copies
 - Import your own PNG/SVG assets (saved inside the map file)
 - Undo/redo, save/open `.mapp` files, export **PNG** or **JPG** at 0.5×–2× resolution
@@ -86,7 +86,7 @@ npm run assets
 
 | Key | Action |
 |---|---|
-| V S B P L T H | Select · Stamp · Land · Ground · Lines · Text · Pan |
+| V S B E P L T H | Select · Stamp · Land brush · Ocean brush · Ground · Lines · Text · Pan |
 | Space + drag / middle mouse | Pan |
 | Wheel | Zoom |
 | Ctrl+Z / Ctrl+Y | Undo / Redo |
@@ -95,7 +95,7 @@ npm run assets
 | R / Shift+R | Rotate ±15° (Shift while dragging the handle snaps to 15°) |
 | F | Flip |
 | [ / ] | Brush size, or scale the selection |
-| Alt while painting | Erase / paint water |
+| Alt while painting | Swap Land ↔ Ocean brush |
 
 ## Licences
 
