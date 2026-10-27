@@ -129,3 +129,23 @@ kbd { background: var(--panel2); border: 1px solid var(--line); border-radius: 4
 #toolOptions input[type=color] { width: 34px; height: 26px; }
 #toolOptions select { max-width: 170px; }
 #topbar button { white-space: nowrap; }
+
+/* layers panel */
+#layers { padding: 6px 8px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 3px; }
+.layer-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid transparent; border-radius: 6px; cursor: pointer; }
+.layer-row:hover { background: #2e271f; }
+.layer-row.active { background: var(--panel2); border-color: var(--accent2); }
+.layer-row.active .nm { color: var(--accent); font-weight: 600; }
+.layer-row.base { cursor: default; }
+.layer-row.base:hover { background: transparent; }
+.layer-row.off .nm, .layer-row.off .ln { opacity: .45; }
+.layer-row .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.layer-row .nm small { color: var(--muted); font-weight: normal; }
+.layer-row .ln { width: 18px; height: 18px; border-radius: 50%; background: #1a1612; border: 1px solid var(--line); font-size: 11px; display: flex; align-items: center; justify-content: center; color: var(--muted); flex: none; }
+.icon-btn { background: none; border: 1px solid transparent; padding: 2px 3px; border-radius: 4px; color: var(--text); display: flex; align-items: center; flex: none; }
+.icon-btn:hover { border-color: var(--line); background: #1a1612; }
+.icon-sp { width: 23px; flex: none; }
+
+/* asset tiles: fixed row height so a long library scrolls instead of squashing tiles */
+#assetGrid, #customGrid { grid-auto-rows: 92px; }
+.asset { aspect-ratio: auto; height: 92px; }

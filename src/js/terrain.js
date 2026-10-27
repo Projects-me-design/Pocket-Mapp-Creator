@@ -99,6 +99,7 @@
     }
   };
   MT.LOOK = LOOK;
+  const PAPER_RGB = { parchment: hex('#f1e3bf'), colour: hex('#f6efdc'), watercolour: hex('#f7efdc') };
 
   const noiseCache = new Map();
   function noiseFor(w, h, seed) {
@@ -136,6 +137,7 @@
     const w = Math.max(1, Math.round(o.mapW * o.scale)), h = Math.max(1, Math.round(o.mapH * o.scale));
     const s = o.scale; // output px per map px
     const land = sampleMask(o.landMask, w, h);
+    if (o.hideLand) land.fill(0); // Land layer hidden: everything is water
     const pathA = sampleMask(o.pathMask, w, h, Math.max(0.5, 1.5 * s));
     const isLand = new Uint8Array(w * h), isWater = new Uint8Array(w * h);
     let anyWater = false, anyLand = false;
@@ -172,6 +174,11 @@
             r += (L.path[0] - r) * k; g += (L.path[1] - g) * k; b += (L.path[2] - b) * k;
             if (o.style !== 'watercolour') { const edge = 1 - Math.abs(pa - 0.42) / 0.14; if (edge > 0) inkA = Math.max(inkA, edge * (o.style === 'parchment' ? 0.55 : 0.35)); }
           }
+          if (d < coastHalf + 0.6) inkA = Math.max(inkA, 1 - sm(coastHalf - 0.6, coastHalf + 0.6, d));
+        } else if (o.hideWater) {
+          // Water layer hidden: plain paper, coastline still inked
+          const d = dOut ? (dOut[i] - 0.5) / s + wob : 1e9;
+          r = PAPER_RGB[o.style][0]; g = PAPER_RGB[o.style][1]; b = PAPER_RGB[o.style][2];
           if (d < coastHalf + 0.6) inkA = Math.max(inkA, 1 - sm(coastHalf - 0.6, coastHalf + 0.6, d));
         } else {
           const d = dOut ? (dOut[i] - 0.5) / s + wob : 1e9;

@@ -38,7 +38,8 @@
     scatter: false, spacing: 1, randScale: 0.15, randRot: 0, randFlip: true, stampScale: 1, depthSort: true,
     lineKind: 'river', lineWidth: 6,
     textFont: 'IM Fell English', textSize: 60, textColor: null, textBold: false, textItalic: false,
-    genre: 'fantasy', kind: 'all', search: ''
+    genre: 'fantasy', kind: 'all', search: '',
+    activeLayer: 'land'
   };
   const imgCache = new Map();
   let needsDraw = true;
@@ -61,6 +62,7 @@
       style: o.style || 'parchment',
       seed: o.seed || Math.floor(Math.random() * 1e6),
       grid: { type: type === 'battle' ? 'square' : 'none', size: 70, color: '#000000', opacity: 0.25 },
+      layers: { water: { visible: true, locked: false }, land: { visible: true, locked: false }, assets: { visible: true, locked: false }, text: { visible: true, locked: false } },
       border: type !== 'battle',
       objects: [],
       custom: {}
@@ -135,7 +137,7 @@
     status('Inking coastlines…');
     const run = () => {
       try {
-        base = MT.renderBase({ landMask, pathMask, mapW: doc.width, mapH: doc.height, scale: maskScale, style: doc.style, mapType: doc.type, seed: doc.seed });
+        base = MT.renderBase(baseOpts(maskScale));
       } finally {
         baseBusy = false; baseDirty = false; needsDraw = true; status('');
       }
@@ -307,10 +309,11 @@
     else { ctx.fillStyle = PAPER[doc.style]; ctx.fillRect(0, 0, doc.width, doc.height); }
     if (opts.floatLand) drawFloatingLand(ctx);
     if (opts.grid !== false) drawGrid(ctx);
-    for (const o of doc.objects) if (o.t !== 'text') drawObject(ctx, o);
+    // layer 3: assets & lines
+    if (layerState('assets').visible) for (const o of doc.objects) if (o.t !== 'text') drawObject(ctx, o);
     drawBorder(ctx);
-    // labels are always drawn last so land, assets and lines never cover them
-    for (const o of doc.objects) if (o.t === 'text') drawObject(ctx, o);
+    // layer 4: text, always on top so nothing covers the labels
+    if (layerState('text').visible) for (const o of doc.objects) if (o.t === 'text') drawObject(ctx, o);
   }
 
   // ------------------------------------------------------------------ stage render loop
@@ -409,9 +412,10 @@
     const lx = (x - o.x) * c - (y - o.y) * s, ly = (x - o.x) * s + (y - o.y) * c;
     return Math.abs(lx) <= w / 2 && Math.abs(ly) <= h / 2;
   }
-  function hitTest(x, y) {
-    for (let i = doc.objects.length - 1; i >= 0; i--) if (doc.objects[i].t === 'text' && hitObj(doc.objects[i], x, y)) return doc.objects[i];
-    for (let i = doc.objects.length - 1; i >= 0; i--) if (doc.objects[i].t !== 'text' && hitObj(doc.objects[i], x, y)) return doc.objects[i];
+  function hitTest(x, y, layer = ui.activeLayer) {
+    if (layer !== 'assets' && layer !== 'text') return null;
+    if (!layerUsable(layer)) return null;
+    for (let i = doc.objects.length - 1; i >= 0; i--) { const o = doc.objects[i]; if (layerOf(o) === layer && hitObj(o, x, y)) return o; }
     return null;
   }
   function hitHandle(x, y) {
@@ -458,7 +462,7 @@
   }
   function endPaint() {
     painting = null;
-    base = MT.renderBase({ landMask, pathMask, mapW: doc.width, mapH: doc.height, scale: maskScale, style: doc.style, mapType: doc.type, seed: doc.seed });
+    base = MT.renderBase(baseOpts(maskScale));
     baseDirty = false; paintPreview = null; needsDraw = true;
     commit();
   }
@@ -572,7 +576,7 @@
       } else { stampLand(landMask, L.comp); stampLand(pathMask, L.pcomp); }
     }
     landSel = null;
-    base = MT.renderBase({ landMask, pathMask, mapW: doc.width, mapH: doc.height, scale: maskScale, style: doc.style, mapType: doc.type, seed: doc.seed });
+    base = MT.renderBase(baseOpts(maskScale));
     baseDirty = false; needsDraw = true;
     if (changed) commit();
     settling = false;
@@ -695,7 +699,8 @@
   function restore(st) {
     const prevSize = [doc.width, doc.height], prevStyle = doc.style, prevType = doc.type;
     const { objects, settings } = JSON.parse(st.json);
-    Object.assign(doc, settings); doc.objects = objects; doc.custom = st.custom;
+    const keepLayers = doc.layers;
+    Object.assign(doc, settings); doc.objects = objects; doc.custom = st.custom; doc.layers = keepLayers;
     if (landMask.width !== st.mw || landMask.height !== st.mh) { landMask.width = pathMask.width = st.mw; landMask.height = pathMask.height = st.mh; maskScale = st.mw / doc.width; }
     landMask.getContext('2d').putImageData(st.land, 0, 0); pathMask.getContext('2d').putImageData(st.path, 0, 0);
     lastLandSnap = st.land; lastPathSnap = st.path;
@@ -739,10 +744,13 @@
     if (e.button === 1 || e.button === 2 && tool !== 'select' || spaceDown || tool === 'pan') { dragState = { type: 'pan', sx: p.sx, sy: p.sy, ox: view.ox, oy: view.oy }; return; }
     if (e.button !== 0) return;
     if (isBrush()) {
+      const msg = layerBlocked('land'); if (msg) { status(msg); return; }
       // Land brush adds land, Ocean brush turns land back into sea; Alt swaps them
       const erase = tool === 'ocean' ? !e.altKey : tool === 'land' ? e.altKey : (ui.brushMode === 'erase' || e.altKey);
       startPaint(p, tool === 'path' ? 'path' : 'land', erase); dragState = { type: 'paint' }; return;
     }
+    if ((tool === 'stamp' || tool === 'line') && layerBlocked('assets')) { status(layerBlocked('assets')); return; }
+    if (tool === 'text' && layerBlocked('text')) { status(layerBlocked('text')); return; }
     if (tool === 'stamp') {
       if (!stampKey) { status('Choose an asset from the library first'); return; }
       const o = placeStamp(p.x, p.y);
@@ -781,16 +789,21 @@
         : { type: 'scale', o, d0: Math.hypot(p.x - o.x, p.y - o.y), s0: o.s };
       return;
     }
-    const hit = hitTest(p.x, p.y);
-    if (!hit && landSel && insideLandBox(p.x, p.y)) { dragState = { type: 'landMove', last: p }; return; }
-    if (!hit && !e.shiftKey && !landSel && landAt(p.x, p.y)) {
-      // clicked bare land: select the whole landmass
-      selection.clear(); pickLand(p.x, p.y);
-      dragState = { type: 'landMove', last: p };
-      refreshPanels(); return;
+    if (ui.activeLayer === 'land') {
+      // Land layer: click land to select a whole landmass; drag inside the box to move it
+      if (landSel && insideLandBox(p.x, p.y)) { dragState = { type: 'landMove', last: p }; return; }
+      if (landSel) settleLand();
+      const msg = layerBlocked('land');
+      if (msg) { status(msg); return; }
+      selection.clear();
+      if (landAt(p.x, p.y)) { pickLand(p.x, p.y); dragState = { type: 'landMove', last: p }; }
+      else status('That is water. Click on land to select a landmass.');
+      refreshPanels(); needsDraw = true; return;
     }
     if (landSel) settleLand();
-    if (!hit && !e.shiftKey && landAt(p.x, p.y)) { selection.clear(); pickLand(p.x, p.y); dragState = { type: 'landMove', last: p }; refreshPanels(); return; }
+    const blocked = layerBlocked(ui.activeLayer);
+    if (blocked) { status(blocked); return; }
+    const hit = hitTest(p.x, p.y);
     if (hit) {
       if (e.shiftKey || e.ctrlKey || e.metaKey) { if (selection.has(hit.id)) selection.delete(hit.id); else selection.add(hit.id); }
       else if (!selection.has(hit.id)) { selection.clear(); selection.add(hit.id); }
@@ -798,6 +811,7 @@
       dragState = { type: 'move', last: p, moved: false };
     } else {
       if (!e.shiftKey) selection.clear();
+      if (layerUsable('land') && landAt(p.x, p.y)) status(`Nothing on the ${ui.activeLayer === 'text' ? 'Text' : 'Assets'} layer here. To select the land, click Land in the Layers panel (or press 1).`);
       marquee = { x0: p.x, y0: p.y, x1: p.x, y1: p.y, add: e.shiftKey };
       dragState = { type: 'marquee' };
     }
@@ -861,7 +875,7 @@
       if (x1 - x0 > 2 || y1 - y0 > 2) for (const o of doc.objects) {
         if (o.hidden || o.locked) continue;
         let cx, cy; if (o.t === 'line') { const b = lineBounds(o); cx = (b.x0 + b.x1) / 2; cy = (b.y0 + b.y1) / 2; } else { cx = o.x; cy = o.y; }
-        if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) selection.add(o.id);
+        if (layerOf(o) === ui.activeLayer && cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) selection.add(o.id);
       }
       marquee = null;
     }
@@ -872,8 +886,8 @@
   stage.addEventListener('pointerleave', () => { hoverPt = null; needsDraw = true; });
   stage.addEventListener('contextmenu', (e) => e.preventDefault());
   stage.addEventListener('dblclick', (e) => {
-    const p = toMap(e); const hit = hitTest(p.x, p.y);
-    if (hit && hit.t === 'text') { selection.clear(); selection.add(hit.id); refreshPanels(); setTimeout(() => { $('#propText')?.focus(); $('#propText')?.select(); }, 20); }
+    const p = toMap(e); const hit = hitTest(p.x, p.y, 'text');
+    if (hit && hit.t === 'text') { setActiveLayer('text', true); selection.clear(); selection.add(hit.id); refreshPanels(); setTimeout(() => { $('#propText')?.focus(); $('#propText')?.select(); }, 20); }
   });
   function updateCursor(p) {
     let c = 'default';
@@ -881,7 +895,7 @@
     else if (isBrush()) c = 'none';
     else if (tool === 'stamp' || tool === 'line') c = 'crosshair';
     else if (tool === 'text') c = 'text';
-    else { const lh = hitLandHandle(p.x, p.y), h = lh ? null : hitHandle(p.x, p.y); if (lh) c = lh === 'rotate' ? 'alias' : 'nwse-resize'; else if (h) c = h.type === 'rotate' ? 'alias' : 'nwse-resize'; else if (hitTest(p.x, p.y) || (landSel && insideLandBox(p.x, p.y))) c = 'move'; else if (landAt(p.x, p.y)) c = 'pointer'; }
+    else { const lh = hitLandHandle(p.x, p.y), h = lh ? null : hitHandle(p.x, p.y); if (lh) c = lh === 'rotate' ? 'alias' : 'nwse-resize'; else if (h) c = h.type === 'rotate' ? 'alias' : 'nwse-resize'; else if (hitTest(p.x, p.y) || (landSel && insideLandBox(p.x, p.y))) c = 'move'; else if (ui.activeLayer === 'land' && landAt(p.x, p.y)) c = 'pointer'; }
     stage.style.cursor = c;
   }
   // Ramer–Douglas–Peucker
@@ -935,17 +949,82 @@
     }
     if ((e.key === 'r' || e.key === 'R') && selection.size) { for (const id of selection) { const o = findObj(id); if (o.t !== 'line') o.r = ((o.r + (e.shiftKey ? -15 : 15) + 540) % 360) - 180; } commit(); refreshPropsValues(); needsDraw = true; return; }
     if ((e.key === 'f' || e.key === 'F') && selection.size) { for (const id of selection) { const o = findObj(id); if (o.t === 'asset') o.fx = !o.fx; } commit(); needsDraw = true; return; }
+    if (e.key === '1') { setActiveLayer('land'); return; }
+    if (e.key === '2') { setActiveLayer('assets'); return; }
+    if (e.key === '3') { setActiveLayer('text'); return; }
     const map = { v: 'select', s: 'stamp', b: 'land', e: 'ocean', p: 'path', l: 'line', t: 'text', h: 'pan' };
     if (map[e.key.toLowerCase()]) setTool(map[e.key.toLowerCase()]);
   });
   window.addEventListener('keyup', (e) => { if (e.key === ' ') { spaceDown = false; stage.style.cursor = ''; } });
-  function selectAll() { selection.clear(); doc.objects.forEach((o) => !o.locked && !o.hidden && selection.add(o.id)); refreshPanels(); needsDraw = true; }
+  function selectAll() { settleLand(); selection.clear(); if (ui.activeLayer === 'land' || !layerUsable(ui.activeLayer)) return; doc.objects.forEach((o) => !o.locked && !o.hidden && layerOf(o) === ui.activeLayer && selection.add(o.id)); refreshPanels(); needsDraw = true; }
+
+  // ------------------------------------------------------------------ layers
+  // 1 Water (base) · 2 Land · 3 Assets (incl. rivers/roads/lines) · 4 Text
+  const LAYERS = [
+    { id: 'text', name: 'Text', n: 4 },
+    { id: 'assets', name: 'Assets', n: 3, sub: 'mountains, towns, ships, lines' },
+    { id: 'land', name: 'Land', n: 2, sub: 'landmasses & ground paint' },
+    { id: 'water', name: 'Water', n: 1, sub: 'base layer' }
+  ];
+  function layerOf(o) { return o.t === 'text' ? 'text' : 'assets'; }
+  function layerState(id) { return (doc.layers && doc.layers[id]) || { visible: true, locked: false }; }
+  function layerUsable(id) { const L = layerState(id); return L.visible && !L.locked; }
+  function baseOpts(scale) {
+    return { landMask, pathMask, mapW: doc.width, mapH: doc.height, scale, style: doc.style, mapType: doc.type, seed: doc.seed, hideLand: !layerState('land').visible, hideWater: !layerState('water').visible };
+  }
+  function layerBlocked(id) { // returns a message when a layer can't be edited, else ''
+    const L = layerState(id), nm = LAYERS.find((x) => x.id === id).name;
+    if (!L.visible) return `The ${nm} layer is hidden. Show it in the Layers panel to edit it.`;
+    if (L.locked) return `The ${nm} layer is locked. Unlock it in the Layers panel to edit it.`;
+    return '';
+  }
+  function setActiveLayer(id, quiet = false) {
+    if (id === 'water' || ui.activeLayer === id) { renderLayers(); return; }
+    if (landSel) settleLand();
+    ui.activeLayer = id;
+    for (const sid of [...selection]) { const o = findObj(sid); if (!o || layerOf(o) !== id) selection.delete(sid); }
+    renderLayers(); if (!quiet) refreshPanels(); needsDraw = true;
+  }
+  const ICON = {
+    eye: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+    eyeOff: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" opacity=".35"/><path d="M3 3l18 18"/></svg>',
+    lock: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
+    unlock: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" opacity=".45"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>'
+  };
+  function renderLayers() {
+    const el = $('#layers'); if (!el || !doc) return;
+    el.innerHTML = LAYERS.map((L) => {
+      const st = layerState(L.id), active = ui.activeLayer === L.id;
+      const count = L.id === 'text' ? doc.objects.filter((o) => o.t === 'text').length : L.id === 'assets' ? doc.objects.filter((o) => o.t !== 'text').length : null;
+      return `<div class="layer-row${active ? ' active' : ''}${st.visible ? '' : ' off'}${L.id === 'water' ? ' base' : ''}" data-layer="${L.id}" title="${L.id === 'water' ? 'Base layer' : 'Click to make this the active layer'}">
+        <button class="icon-btn" data-eye="${L.id}" title="${st.visible ? 'Hide' : 'Show'} layer">${st.visible ? ICON.eye : ICON.eyeOff}</button>
+        ${L.id === 'water' ? '<span class="icon-sp"></span>' : `<button class="icon-btn" data-lock="${L.id}" title="${st.locked ? 'Unlock' : 'Lock'} layer">${st.locked ? ICON.lock : ICON.unlock}</button>`}
+        <span class="ln">${L.n}</span><span class="nm">${L.name}<small>${L.sub ? ' · ' + L.sub : ''}</small></span>
+        ${count !== null ? `<span class="badge">${count}</span>` : ''}
+      </div>`;
+    }).join('');
+    el.querySelectorAll('[data-layer]').forEach((r) => r.onclick = () => setActiveLayer(r.dataset.layer));
+    el.querySelectorAll('[data-eye]').forEach((b) => b.onclick = (e) => {
+      e.stopPropagation(); const id = b.dataset.eye; const st = doc.layers[id]; st.visible = !st.visible;
+      if (landSel && (id === 'land' || id === 'water')) settleLand();
+      if (!st.visible) for (const sid of [...selection]) { const o = findObj(sid); if (o && layerOf(o) === id) selection.delete(sid); }
+      if (id === 'land' || id === 'water') baseDirty = true;
+      markDirty(); renderLayers(); refreshPanels(); needsDraw = true;
+    });
+    el.querySelectorAll('[data-lock]').forEach((b) => b.onclick = (e) => {
+      e.stopPropagation(); const id = b.dataset.lock; const st = doc.layers[id]; st.locked = !st.locked;
+      if (st.locked) { if (id === 'land' && landSel) settleLand(); for (const sid of [...selection]) { const o = findObj(sid); if (o && layerOf(o) === id) selection.delete(sid); } }
+      markDirty(); renderLayers(); refreshPanels(); needsDraw = true;
+    });
+  }
 
   // ------------------------------------------------------------------ tools UI
   function isBrush() { return tool === 'land' || tool === 'ocean' || tool === 'path'; }
   function setTool(t) {
     if (t !== 'select') settleLand();
     tool = t;
+    const want = { land: 'land', ocean: 'land', path: 'land', stamp: 'assets', line: 'assets', text: 'text' }[t];
+    if (want && doc) setActiveLayer(want, true);
     $$('.tool').forEach((b) => b.classList.toggle('active', b.dataset.tool === t));
     renderToolOptions(); needsDraw = true;
   }
@@ -1064,7 +1143,7 @@
   }
 
   // ------------------------------------------------------------------ properties panel
-  function refreshPanels() { renderProps(); scheduleUsedList(); if (tool === 'text' && document.activeElement?.id !== 'toText') renderToolOptions(); }
+  function refreshPanels() { renderProps(); scheduleUsedList(); renderLayers(); if (tool === 'text' && document.activeElement?.id !== 'toText') renderToolOptions(); }
   function propRow(label, html) { return `<div class="row"><label>${label}</label>${html}</div>`; }
   function refreshLandProps() {
     if (!landSel) return; const set = (sel_, v) => { const n = $(sel_); if (n && document.activeElement !== n) n.value = v; };
@@ -1105,7 +1184,7 @@
         ${propRow('Grid', `<select id="pGrid"><option value="none">None</option><option value="square" ${g.type === 'square' ? 'selected' : ''}>Square</option><option value="hex" ${g.type === 'hex' ? 'selected' : ''}>Hex</option></select>`)}
         ${propRow('Cell size', `<input type="number" id="pGridSize" min="10" max="500" value="${g.size}"> px`)}
         ${propRow('Colour', `<input type="color" id="pGridCol" value="${g.color}"><input type="range" id="pGridOp" min="0.05" max="1" step="0.05" value="${g.opacity}">`)}
-        <p class="muted">Suggested order: paint land with the <b>Land</b> and <b>Ocean</b> brushes, add mountains, forests and towns, then finish with <b>Text</b>. Labels always sit on top of everything else.<br>With the <b>Select</b> tool, click any land to select that landmass, then drag its corners to make it bigger or smaller.</p>`;
+        <p class="muted">Suggested order: paint land with the <b>Land</b> and <b>Ocean</b> brushes, add mountains, forests and towns, then finish with <b>Text</b>. Labels always sit on top of everything else.<br>To resize land: make <b>Land</b> the active layer, choose <b>Select</b>, click the land and drag its corners.</p>`;
       $('#pName').onchange = (e) => { doc.name = e.target.value || 'Untitled Map'; commit(); };
       $('#pType').onchange = (e) => { doc.type = e.target.value; ui.kind = MAP_TYPES[doc.type].kind; baseDirty = true; buildLibrary(); commit(); needsDraw = true; };
       $('#pAllLand').onclick = () => { fillMask(landMask, true); baseDirty = true; commit(); needsDraw = true; };
@@ -1224,7 +1303,7 @@
       g.querySelectorAll('[data-act]').forEach((b) => b.onclick = async () => {
         const act = b.dataset.act;
         if (act === 'toggle') { if (openGroups.has(key)) openGroups.delete(key); else openGroups.add(key); renderUsedList(); }
-        if (act === 'sel') { selection.clear(); items.forEach((o) => selection.add(o.id)); refreshPanels(); needsDraw = true; }
+        if (act === 'sel') { setActiveLayer(layerOf(items[0]), true); selection.clear(); items.forEach((o) => selection.add(o.id)); refreshPanels(); needsDraw = true; }
         if (act === 'hide') { const hide = !items.every((o) => o.hidden); items.forEach((o) => { o.hidden = hide; if (hide) selection.delete(o.id); }); commit(); refreshPanels(); needsDraw = true; }
         if (act === 'del') {
           const ok = await confirmBox(`Delete all ${items.length} × “${g.querySelector('.nm').textContent}”?`, 'You can undo this with Ctrl+Z.');
@@ -1275,8 +1354,9 @@
         bindCmdButtons(d);
         d.querySelector('#nCreate').onclick = () => {
           const w = clamp(+d.querySelector('#nW').value || 2000, 200, 8000), h = clamp(+d.querySelector('#nH').value || 1400, 200, 8000);
+          const name = d.querySelector('#nName').value; // read before the dialog is cleared
           closeDialog();
-          newMap({ type, style, width: w, height: h, name: d.querySelector('#nName').value, start: 'sea' });
+          newMap({ type, style, width: w, height: h, name, start: 'sea' });
         };
       });
     };
@@ -1345,7 +1425,7 @@
     await whenImagesReady(); await document.fonts.ready;
     // render the terrain at full output resolution where memory allows
     const ts = Math.min(s, Math.sqrt(16e6 / (doc.width * doc.height)));
-    const hiBase = MT.renderBase({ landMask, pathMask, mapW: doc.width, mapH: doc.height, scale: ts, style: doc.style, mapType: doc.type, seed: doc.seed });
+    const hiBase = MT.renderBase(baseOpts(ts));
     const cv = document.createElement('canvas'); cv.width = Math.round(doc.width * s); cv.height = Math.round(doc.height * s);
     const ctx = cv.getContext('2d'); ctx.scale(s, s);
     renderMapContent(ctx, hiBase, { grid });
@@ -1378,7 +1458,7 @@
       <div class="actions"><button class="primary" id="cOk">Close</button></div>`, (d) => { d.querySelector('#cOk').onclick = closeDialog; });
   }
   function shortcutsDialog() {
-    const rows = [['V / S / B / E / P / L / T / H', 'Select · Stamp · Land brush · Ocean brush · Ground · Lines · Text · Pan'], ['Space + drag, middle mouse', 'Pan'], ['Mouse wheel', 'Zoom'], ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'], ['Ctrl+D', 'Duplicate'], ['Alt + drag', 'Duplicate while moving'], ['Delete', 'Delete selection'], ['R / Shift+R', 'Rotate ±15°'], ['F', 'Flip asset'], ['Click land (Select tool)', 'Select a whole landmass to move, resize or rotate'], ['[ / ]', 'Brush size, or scale selection'], ['Arrows (+Shift)', 'Nudge 1px (10px)'], ['Shift while rotating', 'Snap to 15°'], ['Alt while painting', 'Swap Land ↔ Ocean brush']];
+    const rows = [['V / S / B / E / P / L / T / H', 'Select · Stamp · Land brush · Ocean brush · Ground · Lines · Text · Pan'], ['Space + drag, middle mouse', 'Pan'], ['Mouse wheel', 'Zoom'], ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'], ['Ctrl+D', 'Duplicate'], ['Alt + drag', 'Duplicate while moving'], ['Delete', 'Delete selection'], ['R / Shift+R', 'Rotate ±15°'], ['F', 'Flip asset'], ['Click land (Select tool, Land layer)', 'Select a whole landmass to move, resize or rotate'], ['1 / 2 / 3', 'Make Land / Assets / Text the active layer'], ['[ / ]', 'Brush size, or scale selection'], ['Arrows (+Shift)', 'Nudge 1px (10px)'], ['Shift while rotating', 'Snap to 15°'], ['Alt while painting', 'Swap Land ↔ Ocean brush']];
     openDialog(`<h2>Keyboard shortcuts</h2><table>${rows.map(([k, v]) => `<tr><td><kbd>${k}</kbd></td><td>${v}</td></tr>`).join('')}</table><div class="actions"><button class="primary" id="kOk">Close</button></div>`, (d) => { d.querySelector('#kOk').onclick = closeDialog; });
   }
 
@@ -1451,6 +1531,7 @@
   if (api) api.onMenu((cmd) => COMMANDS[cmd]?.());
 
   function syncTopbar() {
+    renderLayers();
     $('#styleSelect').value = doc.style;
     $('#gridToggle').checked = doc.grid.type !== 'none';
     $('#borderToggle').checked = !!doc.border;
@@ -1471,7 +1552,7 @@
     const el = $('#status');
     if (coords) { if (!el.dataset.msg) el.textContent = msg; return; }
     el.dataset.msg = msg ? '1' : ''; el.textContent = msg;
-    clearTimeout(statusTimer); if (msg) statusTimer = setTimeout(() => { el.dataset.msg = ''; }, 2500);
+    clearTimeout(statusTimer); if (msg) statusTimer = setTimeout(() => { el.dataset.msg = ''; }, 5000);
   }
 
   // ------------------------------------------------------------------ example map
@@ -1589,9 +1670,10 @@
     const before = doc.objects.length; undo(); const afterUndo = Math.round(findObj(castle.id)?.r); redo(); const afterRedo = Math.round(findObj(castle.id)?.r);
     await wait(1500); await whenImagesReady(); await shot('08-interactions');
     const pineCount = doc.objects.filter((o) => o.a === 'pine').length;
+    setActiveLayer('assets');
     // landmass selection: pick the island, scale it up 1.5x, check land area and items followed
     const area = () => { const d = landMask.getContext('2d').getImageData(0, 0, landMask.width, landMask.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 127) n++; return n; };
-    const a0 = area(); setTool('select'); selection.clear(); refreshPanels();
+    const a0 = area(); setTool('select'); setActiveLayer('land'); selection.clear(); refreshPanels();
     const pine0 = doc.objects.find((o) => o.a === 'pine'); const px0 = pine0.x;
     ev('pointerdown', 700, 760); ev('pointerup', 700, 760);
     const picked = !!landSel; const nItems = landSel ? landSel.items.length : -1;
@@ -1604,6 +1686,17 @@
     const a1 = area();
     window.__land = `picked=${picked} items=${nItems} scale=${sAfter} area=${(a1 / a0).toFixed(2)} pineMoved=${Math.round(pine0.x - px0)}`;
     undo(); const a2 = area(); window.__land += ` undoArea=${(a2 / a0).toFixed(2)}`; redo();
+    // layers: clicking a mountain-covered spot on the Land layer selects LAND, not the mountain
+    setActiveLayer('land'); const onPine = doc.objects.find((o) => o.a === 'pine');
+    ev('pointerdown', onPine.x, onPine.y); ev('pointerup', onPine.x, onPine.y);
+    const landUnderAsset = !!landSel && selection.size === 0; settleLand();
+    setActiveLayer('assets'); ev('pointerdown', onPine.x, onPine.y); ev('pointerup', onPine.x, onPine.y);
+    const assetOnAssets = selection.size === 1 && findObj([...selection][0]).a === 'pine' && !landSel;
+    doc.layers.assets.locked = true; selection.clear(); ev('pointerdown', onPine.x, onPine.y); ev('pointerup', onPine.x, onPine.y);
+    const lockedBlocks = selection.size === 0; doc.layers.assets.locked = false;
+    doc.layers.text.visible = false; doc.layers.water.visible = false; baseDirty = true; renderLayers(); await wait(1500); await shot('11-layers-hidden');
+    doc.layers.text.visible = true; doc.layers.water.visible = true; baseDirty = true; renderLayers();
+    window.__land += ` landUnderAsset=${landUnderAsset} assetOnAssets=${assetOnAssets} lockedBlocks=${lockedBlocks}`;
     await wait(1500); await shot('10-land-resized');
     document.title = `TESTDONE ${window.__land} label=${window.__label} landStart=${window.__landStart} objs=${before} pines=${pineCount} rotated=${rotated} undoR=${afterUndo} redoR=${afterRedo} sel=${castle.a} png=${window.__exportPng}`;
   }

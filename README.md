@@ -25,7 +25,8 @@ Includes ships (galleon, longship, merchant ship, rowing boat, cargo ship), dock
 - Every asset can be moved, **rotated** (handle, R key, or slider) and **scaled** (corner handles, [ ] keys, or slider), flipped, layered, faded
 - **Scatter brush** to paint whole forests or mountain ranges with random size, rotation and flip
 - Every new map starts as **open ocean**. Paint land in any shape with the **Land brush** (B), and turn land back into sea with the **Ocean brush** (E). Coastlines are inked automatically. The **Ground brush** paints roads, dirt and clearings
-- **Select a landmass** by clicking it with the Select tool. Drag it to move it, drag a corner to make it **bigger or smaller**, or use the round handle to rotate it. Size and rotation can also be typed in. Mountains, towns, roads and labels on that land move with it (this can be turned off). Delete removes the land, and Esc or clicking the sea finishes
+- **Layers**: 1 **Water** (base), 2 **Land**, 3 **Assets** (mountains, towns, ships, rivers and roads), 4 **Text** (always on top). Each layer can be hidden or locked, and hidden layers are left out of exports. The Select tool only picks things on the **active** layer. Click a layer in the Layers panel, or press 1 for Land, 2 for Assets, 3 for Text. Drawing tools switch to their own layer automatically.
+- **Resize land**: make **Land** the active layer, choose **Select** and click any land, even under mountains or towns. Drag a corner to make it **bigger or smaller**, drag inside the box to move it, or use the round handle to rotate it. Size and rotation can also be typed in. Items on that land move with it (this can be turned off). Delete removes the land, and Esc or **Done** finishes
 - **Line tool** for tapering rivers, dashed roads, dotted trails, dash-dot borders and walls
 - **Text labels**: pick a font, size and colour in the Text tool bar, then click where the label should go. Drag a label to move it and resize it from the same bar. 8 bundled map fonts, halo, letter-spacing, CAPS and **curved text**. Labels always sit on top of land, assets and lines
 - **Assets used** panel — every asset type on the map with its count; select all copies, hide them, or delete all copies in one click; expand to jump to individual copies
@@ -96,7 +97,8 @@ npm run assets
 | Delete | Delete selection |
 | R / Shift+R | Rotate ±15° (Shift while dragging the handle snaps to 15°) |
 | F | Flip |
-| Click land (Select tool) | Select a landmass; [ ] resize it, R rotate, Delete remove |
+| 1 / 2 / 3 | Active layer: Land / Assets / Text |
+| Click land (Select tool, Land layer) | Select a landmass; [ ] resize it, R rotate, Delete remove |
 | [ / ] | Brush size, or scale the selection |
 | Alt while painting | Swap Land ↔ Ocean brush |
 
