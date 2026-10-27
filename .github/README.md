@@ -44,13 +44,15 @@ npm start
 The workflow in `.github/workflows/build.yml` builds all three platforms on GitHub's own machines using Node.js 24.
 
 1. Create a GitHub repository called `Pocket-Mapp-Creator` and push this folder to it, including `package-lock.json`.
-2. **To test a build:** on GitHub open **Actions → Build installers → Run workflow**. When it finishes (about 10 minutes), download the installers from the **Artifacts** section at the bottom of the run page.
+2. **To test a build:** on GitHub open **Actions → Build installers → Run workflow**. When it finishes (about 10 minutes), open the **Releases** page. The installers are on a **draft** release called `build-<number>`, which only you can see. Delete old test drafts when you no longer need them.
 3. **To publish a release:** bump `version` in `package.json`, then tag and push:
    ```bash
    git tag v0.1.0
    git push origin v0.1.0
    ```
-   The installers are attached to a new GitHub Release automatically.
+   The installers are attached to a release and it is made public once all three platforms have built.
+
+Installers are stored on GitHub Releases rather than as workflow "artifacts", so they don't use up the account's Actions artifact storage quota.
 
 | Platform | Files produced |
 |---|---|
